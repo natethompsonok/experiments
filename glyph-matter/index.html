@@ -1,0 +1,1059 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Glyph Matter</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed WebGL stage on the left, a narrow instrument panel of sliders on the right; stacks on phones with the stage pinned on top. */
+:root {
+  --ground: #e4e7ec;
+  --panel: #f5f6f8;
+  --ink: #15171c;
+  --muted: #5d6474;
+  --line: #d4d8e0;
+  --track: #dce0e7;
+  --chip: #eaedf1;
+  --accent: #2a3ff5;
+  --accent-ink: #ffffff;
+  --overlay: rgba(245, 246, 248, 0.82);
+  --f-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --f-ui: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0e1015; --panel: #14171d; --ink: #e6e8ee; --muted: #959cab; --line: #262a33;
+    --track: #2a2f39; --chip: #1c2028; --accent: #8e9cff; --accent-ink: #0e1015; --overlay: rgba(20, 23, 29, 0.8);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0e1015; --panel: #14171d; --ink: #e6e8ee; --muted: #959cab; --line: #262a33;
+  --track: #2a2f39; --chip: #1c2028; --accent: #8e9cff; --accent-ink: #0e1015; --overlay: rgba(20, 23, 29, 0.8);
+  color-scheme: dark;
+}
+
+html, body { height: 100%; }
+body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.4 var(--f-ui); }
+* { box-sizing: border-box; }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: 100%; }
+.stage { position: relative; min-width: 0; overflow: hidden; background: var(--ground); }
+.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.stage canvas:active { cursor: grabbing; }
+
+.hud { position: absolute; display: flex; gap: 8px; align-items: center; pointer-events: none; }
+.hud > * { pointer-events: auto; }
+.hud.tl { top: 12px; left: max(12px, env(safe-area-inset-left, 0px)); }
+.hud.bl { bottom: 12px; left: max(12px, env(safe-area-inset-left, 0px)); }
+.hud.br { bottom: 12px; right: 12px; }
+.pill {
+  font: 500 11px/1 var(--f-mono); letter-spacing: 0.02em; color: var(--ink);
+  background: var(--overlay); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px; white-space: nowrap;
+}
+.pill.hint { color: var(--muted); transition: opacity .6s; }
+.pill.hint.gone { opacity: 0; }
+.pill.warn { border-color: #d9534f; }
+button.pill { cursor: pointer; }
+button.pill:hover { border-color: var(--accent); }
+
+.panel {
+  background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; min-width: 0;
+  padding-block: 18px 28px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 14px;
+  scrollbar-width: thin;
+}
+.brand { display: flex; flex-direction: column; gap: 2px; }
+.brand h1 {
+  margin: 0; font: 800 34px/0.9 var(--f-display); font-variation-settings: "opsz" 96; letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.brand p { margin: 0; color: var(--muted); font-size: 12.5px; }
+
+.row { display: flex; gap: 8px; align-items: center; }
+.row > select { flex: 1; min-width: 0; }
+
+.btn {
+  border: 1px solid var(--line); background: var(--chip); border-radius: 7px; padding: 7px 11px; cursor: pointer;
+  font-size: 12.5px; font-weight: 500; white-space: nowrap;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.icon { padding: 7px 10px; font-family: var(--f-mono); }
+
+select, input[type="text"], textarea {
+  background: var(--chip); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font-size: 13px; width: 100%;
+}
+textarea { resize: vertical; min-height: 64px; font: 600 15px/1.25 var(--f-ui); letter-spacing: 0.02em; }
+
+details.sec { border-top: 1px solid var(--line); padding-top: 10px; }
+details.sec > summary {
+  list-style: none; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline;
+  font: 600 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); padding-block: 4px 8px;
+}
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::after { content: "−"; font-size: 14px; }
+details.sec:not([open]) > summary::after { content: "+"; }
+.sec-body { display: flex; flex-direction: column; gap: 12px; }
+
+.ctl { display: flex; flex-direction: column; gap: 6px; }
+.ctl .lbl { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 12.5px; user-select: none; }
+.ctl .lbl span { cursor: default; }
+.ctl output { font: 500 11.5px/1 var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.ctl.inline { flex-direction: row; justify-content: space-between; align-items: center; }
+.ctl.inline .lbl { flex: 1; }
+
+input[type="range"] { -webkit-appearance: none; appearance: none; width: 100%; height: 18px; background: transparent; margin: 0; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: linear-gradient(to right, var(--accent) var(--fill, 50%), var(--track) var(--fill, 50%)); }
+input[type="range"]::-moz-range-track { height: 3px; border-radius: 2px; background: var(--track); }
+input[type="range"]::-moz-range-progress { height: 3px; border-radius: 2px; background: var(--accent); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; margin-top: -5.5px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+input[type="range"]::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+
+.switch { position: relative; width: 34px; height: 20px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.switch i { position: absolute; inset: 0; border-radius: 999px; background: var(--track); transition: background .15s; pointer-events: none; }
+.switch i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--panel); transition: transform .15s; }
+.switch input:checked + i { background: var(--accent); }
+.switch input:checked + i::after { transform: translateX(14px); }
+.switch input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+input[type="color"] { width: 44px; height: 26px; border: 1px solid var(--line); border-radius: 6px; padding: 2px; background: var(--chip); cursor: pointer; }
+.colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+.modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.modes button {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left;
+  border: 1px solid var(--line); background: var(--chip); border-radius: 8px; padding: 8px 9px; cursor: pointer; min-width: 0;
+}
+.modes button b { font: 700 14px/1 var(--f-display); letter-spacing: -0.01em; }
+.modes button small { font: 10px/1.15 var(--f-mono); color: var(--muted); }
+.modes button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.modes button[aria-pressed="true"] small { color: inherit; opacity: .8; }
+
+.font-row { display: flex; gap: 6px; }
+.font-row select, .font-row input { flex: 1; min-width: 0; }
+
+.foot { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 14px; }
+.small { font-size: 11.5px; color: var(--muted); margin: 0; }
+
+dialog {
+  border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); padding: 16px;
+  width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+}
+dialog::backdrop { background: rgba(10, 12, 16, 0.55); }
+dialog img { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+dialog .dlg-body { display: flex; flex-direction: column; gap: 12px; }
+dialog textarea { font: 12px/1.45 var(--f-mono); min-height: 260px; letter-spacing: 0; }
+dialog h2 { margin: 0; font: 700 20px/1.1 var(--f-display); }
+
+@media (max-width: 860px) {
+  html, body { height: auto; }
+  .app { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .stage { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; height: 50svh; border-bottom: 1px solid var(--line); }
+  .panel { border-left: 0; overflow: visible; }
+  .hud.tl { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div class="app">
+  <div class="stage" id="stage">
+    <div class="hud tl"><span class="pill hint" id="hint">Drag to orbit · scroll to zoom · right-drag to pan</span></div>
+    <div class="hud bl"><span class="pill" id="status">Starting…</span></div>
+    <div class="hud br">
+      <button class="pill" id="btnView" type="button">Reset view</button>
+      <button class="pill" id="btnSnap" type="button">Snapshot</button>
+    </div>
+  </div>
+  <aside class="panel" id="panel">
+    <div class="brand">
+      <h1>Glyph Matter</h1>
+      <p>Generative type as form, material and space.</p>
+    </div>
+    <div class="row">
+      <select id="presetSel" aria-label="Preset"></select>
+      <button class="btn primary" id="btnRandom" type="button" title="Shortcut: R">Randomize</button>
+    </div>
+    <div id="controls"></div>
+    <div class="foot">
+      <button class="btn" id="btnSettings" type="button">Settings JSON</button>
+      <button class="btn" id="btnResetAll" type="button">Reset all</button>
+    </div>
+    <p class="small">Double-click any slider label to reset it. Press R to randomize.</p>
+  </aside>
+</div>
+
+<dialog id="snapDlg">
+  <div class="dlg-body">
+    <h2>Snapshot</h2>
+    <img id="snapImg" alt="Rendered snapshot of the current type design">
+    <p class="small">Right-click or long-press the image to save it.</p>
+    <div class="row"><a class="btn" id="snapDl" download="glyph-matter.png" hidden>Download PNG</a><button class="btn" type="button" data-close>Close</button></div>
+  </div>
+</dialog>
+
+<dialog id="setDlg">
+  <div class="dlg-body">
+    <h2>Settings</h2>
+    <p class="small">Copy these to save a design, or paste settings here and apply them.</p>
+    <textarea id="setText" spellcheck="false" aria-label="Settings JSON"></textarea>
+    <p class="small" id="setMsg"></p>
+    <div class="row"><button class="btn" id="setCopy" type="button">Copy</button><button class="btn primary" id="setApply" type="button">Apply</button><button class="btn" type="button" data-close>Close</button></div>
+  </div>
+</dialog>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/* ------------------------------------------------------------------ fonts */
+const FONTS = [
+  ['Sans', [['Bricolage Grotesque','200..800'],['Unbounded','200..900'],['Syne','400..800'],['Big Shoulders Display','100..900'],['Darker Grotesque','300..900'],['Familjen Grotesk','400..700'],['Montserrat','100..900'],['Archivo Black','400'],['Anton','400'],['Bebas Neue','400'],['Six Caps','400'],['Tilt Warp','400'],['Dela Gothic One','400'],['Bowlby One','400'],['Climate Crisis','400']]],
+  ['Serif', [['Fraunces','100..900'],['Bodoni Moda','400..900'],['Playfair Display','400..900'],['Instrument Serif','400'],['DM Serif Display','400'],['Gloock','400'],['Abril Fatface','400'],['Rozha One','400']]],
+  ['Display', [['Monoton','400'],['Bungee','400'],['Bungee Shade','400'],['Rubik Mono One','400'],['Rubik Glitch','400'],['Major Mono Display','400'],['Shrikhand','400'],['Bagel Fat One','400'],['Kablammo','400'],['Zen Dots','400'],['Orbitron','400..900'],['Michroma','400'],['Syncopate','400;700'],['Righteous','400']]],
+  ['Mono & pixel', [['Space Mono','400;700'],['JetBrains Mono','100..800'],['Silkscreen','400;700'],['VT323','400'],['Press Start 2P','400'],['Sixtyfour','400'],['Workbench','400']]],
+  ['Script', [['Pacifico','400'],['Yellowtail','400']]],
+];
+const FONT_SPEC = new Map(); const FONT_ORDER = []; const FONT_CAT = new Map();
+for (const [cat, list] of FONTS) for (const [n, s] of list) { FONT_SPEC.set(n, s); FONT_ORDER.push(n); FONT_CAT.set(n, cat); }
+const customFonts = [];
+
+const sheetCache = new Map();
+function addSheet(url) {
+  return new Promise((res, rej) => {
+    const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = url;
+    l.onload = () => res(); l.onerror = () => { l.remove(); rej(new Error('sheet')); };
+    document.head.appendChild(l);
+  });
+}
+function ensureFont(family) {
+  if (!sheetCache.has(family)) {
+    const base = 'https://fonts.googleapis.com/css2?family=' + encodeURIComponent(family).replace(/%20/g, '+');
+    const spec = FONT_SPEC.get(family);
+    const p = (async () => {
+      if (spec) return addSheet(base + ':wght@' + spec + '&display=block');
+      try { await addSheet(base + ':wght@100..900&display=block'); }
+      catch { await addSheet(base + '&display=block'); }
+    })();
+    sheetCache.set(family, p);
+    p.catch(() => sheetCache.delete(family));
+  }
+  return sheetCache.get(family);
+}
+
+/* ------------------------------------------------------------- materials */
+const MATS = {
+  chrome:     { label: 'Chrome',     type: 'physical', metalness: 1, roughness: .05, transmission: 0, iridescence: 0, clearcoat: 0, sheen: 0, colorA: '#ffffff', colorB: '#d9e0ff' },
+  gold:       { label: 'Gold',       type: 'physical', metalness: 1, roughness: .22, transmission: 0, iridescence: 0, clearcoat: 0, sheen: 0, colorA: '#ffd27a', colorB: '#c07a26' },
+  glass:      { label: 'Glass',      type: 'physical', metalness: 0, roughness: .04, transmission: 1, iridescence: 0, clearcoat: 0, sheen: 0, colorA: '#ffffff', colorB: '#bfe0ff' },
+  iridescent: { label: 'Iridescent', type: 'physical', metalness: 1, roughness: .12, transmission: 0, iridescence: 1, clearcoat: 0, sheen: 0, colorA: '#ffffff', colorB: '#f2f2ff' },
+  clay:       { label: 'Clay',       type: 'physical', metalness: 0, roughness: .88, transmission: 0, iridescence: 0, clearcoat: 0, sheen: 0, colorA: '#e6d6c2', colorB: '#c49f80' },
+  plastic:    { label: 'Gloss plastic', type: 'physical', metalness: 0, roughness: .35, transmission: 0, iridescence: 0, clearcoat: 1, sheen: 0, colorA: '#ff5a36', colorB: '#ffb0c4' },
+  velvet:     { label: 'Velvet',     type: 'physical', metalness: 0, roughness: 1, transmission: 0, iridescence: 0, clearcoat: 0, sheen: 1, colorA: '#3a1f63', colorB: '#a3245a' },
+  toon:       { label: 'Toon',       type: 'toon',   colorA: '#ff7a59', colorB: '#ffd166' },
+  normal:     { label: 'Normal map', type: 'normal' },
+  wire:       { label: 'Wireframe',  type: 'wire',   colorA: '#2034ff', colorB: '#ff3d7f' },
+};
+const MAT_KEYS = ['metalness', 'roughness', 'transmission', 'iridescence', 'clearcoat', 'sheen', 'colorA', 'colorB'];
+
+/* ---------------------------------------------------------------- schema */
+const MESH = ['inflate', 'relief', 'voxels'];
+const MODES = [
+  ['inflate', 'Inflate', 'pressurised balloon'],
+  ['relief', 'Relief', 'embossed sheet'],
+  ['voxels', 'Voxels', 'instanced solids'],
+  ['particles', 'Particles', 'point cloud'],
+  ['contours', 'Contours', 'scanline terrain'],
+  ['slices', 'Slices', 'stacked layers'],
+];
+const SCHEMA = [
+  { sec: 'Type', items: [
+    { k: 'text', type: 'textarea', def: 'SOFT\nMATTER', lv: 'glyph', label: 'Text' },
+    { k: 'font', type: 'font', def: 'Bricolage Grotesque', lv: 'glyph' },
+    { k: 'weight', type: 'range', min: 100, max: 900, step: 100, def: 800, lv: 'glyph', label: 'Weight' },
+    { k: 'tracking', type: 'range', min: -0.15, max: 0.8, step: 0.01, def: 0.0, lv: 'glyph', label: 'Tracking', unit: 'em' },
+    { k: 'leading', type: 'range', min: 0.6, max: 1.8, step: 0.01, def: 0.92, lv: 'glyph', label: 'Leading' },
+  ]},
+  { sec: 'Form', items: [
+    { k: 'mode', type: 'modes', def: 'inflate', lv: 'geo' },
+    { k: 'res', type: 'range', min: 40, max: 320, step: 4, def: 160, lv: 'field', label: 'Resolution', unit: ' cols' },
+    { k: 'depth', type: 'range', min: -3, max: 4, step: 0.01, def: 1.1, lv: 'geo', label: 'Depth' },
+    { k: 'roundness', type: 'range', min: 0.03, max: 1, step: 0.01, def: 0.6, lv: 'field', label: 'Roundness' },
+    { k: 'smooth', type: 'range', min: 0, max: 6, step: 1, def: 2, lv: 'field', label: 'Smoothing' },
+    { k: 'shape', type: 'select', def: 'box', lv: 'geo', label: 'Element', modes: ['voxels'],
+      options: [['box', 'Cube'], ['sphere', 'Sphere'], ['cylinder', 'Column'], ['octa', 'Octahedron'], ['torus', 'Ring'], ['cone', 'Spike']] },
+    { k: 'size', type: 'range', min: 0.1, max: 1.8, step: 0.01, def: 0.9, lv: 'live', label: 'Element size', modes: ['voxels'] },
+    { k: 'perCell', type: 'range', min: 1, max: 10, step: 1, def: 3, lv: 'geo', label: 'Density', unit: '/cell', modes: ['particles'] },
+    { k: 'pointSize', type: 'range', min: 0.01, max: 0.4, step: 0.005, def: 0.06, lv: 'geo', label: 'Point size', modes: ['particles'] },
+    { k: 'lineStep', type: 'range', min: 1, max: 10, step: 1, def: 2, lv: 'geo', label: 'Line spacing', modes: ['contours'] },
+    { k: 'lineDir', type: 'select', def: 'rows', lv: 'geo', label: 'Lines', modes: ['contours'], options: [['rows', 'Rows'], ['cols', 'Columns'], ['grid', 'Grid']] },
+    { k: 'insideOnly', type: 'toggle', def: false, lv: 'geo', label: 'Only inside glyphs', modes: ['contours'] },
+    { k: 'layers', type: 'range', min: 2, max: 64, step: 1, def: 24, lv: 'geo', label: 'Layers', modes: ['slices'] },
+    { k: 'spacing', type: 'range', min: 0, max: 0.8, step: 0.005, def: 0.12, lv: 'geo', label: 'Layer gap', modes: ['slices'] },
+    { k: 'layerRot', type: 'range', min: -8, max: 8, step: 0.1, def: 1.5, lv: 'geo', label: 'Layer rotation', unit: '°', modes: ['slices'] },
+    { k: 'layerScale', type: 'range', min: -0.06, max: 0.06, step: 0.001, def: 0, lv: 'geo', label: 'Layer scale', modes: ['slices'] },
+    { k: 'opacity', type: 'range', min: 0.02, max: 1, step: 0.01, def: 0.35, lv: 'geo', label: 'Opacity', modes: ['slices', 'contours', 'particles'] },
+    { k: 'glow', type: 'toggle', def: true, lv: 'geo', label: 'Additive glow', modes: ['particles', 'slices', 'contours'] },
+  ]},
+  { sec: 'Distort', items: [
+    { k: 'noise', type: 'range', min: 0, max: 2.5, step: 0.01, def: 0.3, lv: 'live', label: 'Noise' },
+    { k: 'noiseScale', type: 'range', min: 0.05, max: 1.5, step: 0.01, def: 0.35, lv: 'live', label: 'Noise scale' },
+    { k: 'speed', type: 'range', min: 0, max: 3, step: 0.01, def: 0.35, lv: 'live', label: 'Flow speed' },
+    { k: 'wave', type: 'range', min: 0, max: 2, step: 0.01, def: 0, lv: 'live', label: 'Wave' },
+    { k: 'waveFreq', type: 'range', min: 0.1, max: 3, step: 0.01, def: 0.9, lv: 'live', label: 'Wave frequency' },
+    { k: 'twist', type: 'range', min: -3.14, max: 3.14, step: 0.01, def: 0, lv: 'live', label: 'Twist', unit: ' rad' },
+    { k: 'bend', type: 'range', min: -1, max: 1, step: 0.01, def: 0, lv: 'live', label: 'Bend', unit: ' turn' },
+    { k: 'skew', type: 'range', min: -1, max: 1, step: 0.01, def: 0, lv: 'live', label: 'Shear' },
+    { k: 'scatter', type: 'range', min: 0, max: 6, step: 0.01, def: 0, lv: 'live', label: 'Scatter', modes: ['voxels', 'particles'] },
+    { k: 'spin', type: 'range', min: 0, max: 3.14, step: 0.01, def: 0, lv: 'live', label: 'Tumble', modes: ['voxels'] },
+  ]},
+  { sec: 'Material', items: [
+    { k: 'material', type: 'select', def: 'chrome', lv: 'matpreset', label: 'Surface', modes: MESH,
+      options: Object.entries(MATS).map(([k, v]) => [k, v.label]) },
+    { k: 'colors', type: 'colors' },
+    { k: 'gradDir', type: 'select', def: 'x', lv: 'geo', label: 'Gradient', options: [['x', 'Horizontal'], ['y', 'Vertical'], ['depth', 'Depth'], ['radial', 'Radial'], ['noise', 'Noise'], ['none', 'Solid']] },
+    { k: 'metalness', type: 'range', min: 0, max: 1, step: 0.01, def: 1, lv: 'mat', label: 'Metalness', modes: MESH, mat: 'physical' },
+    { k: 'roughness', type: 'range', min: 0, max: 1, step: 0.01, def: 0.05, lv: 'mat', label: 'Roughness', modes: MESH, mat: 'physical' },
+    { k: 'transmission', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'mat', label: 'Transmission', modes: MESH, mat: 'physical' },
+    { k: 'iridescence', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'mat', label: 'Iridescence', modes: MESH, mat: 'physical' },
+    { k: 'clearcoat', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'mat', label: 'Clearcoat', modes: MESH, mat: 'physical' },
+    { k: 'sheen', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'mat', label: 'Sheen', modes: MESH, mat: 'physical' },
+    { k: 'flat', type: 'toggle', def: false, lv: 'mat', label: 'Faceted shading', modes: MESH },
+    { k: 'wireframe', type: 'toggle', def: false, lv: 'mat', label: 'Wireframe overlay', modes: MESH },
+  ]},
+  { sec: 'Space', items: [
+    { k: 'bg', type: 'color', def: '#c9ced6', lv: 'scene', label: 'Background' },
+    { k: 'backdrop', type: 'select', def: 'stripes', lv: 'scene', label: 'Backdrop', options: [['none', 'None'], ['stripes', 'Stripes'], ['checker', 'Checker'], ['dots', 'Dots'], ['grid', 'Grid'], ['gradient', 'Gradient']] },
+    { k: 'bdColor', type: 'color', def: '#1b1f27', lv: 'scene', label: 'Backdrop colour' },
+    { k: 'bdDist', type: 'range', min: 2, max: 30, step: 0.1, def: 10, lv: 'scene', label: 'Backdrop distance' },
+    { k: 'exposure', type: 'range', min: 0.2, max: 2.5, step: 0.01, def: 1, lv: 'scene', label: 'Exposure' },
+    { k: 'envInt', type: 'range', min: 0, max: 3, step: 0.01, def: 1, lv: 'mat', label: 'Reflections' },
+    { k: 'light', type: 'range', min: 0, max: 360, step: 1, def: 40, lv: 'scene', label: 'Key light angle', unit: '°' },
+    { k: 'fov', type: 'range', min: 10, max: 100, step: 1, def: 35, lv: 'scene', label: 'Lens (dolly zoom)', unit: '°' },
+    { k: 'autoRotate', type: 'range', min: -3, max: 3, step: 0.01, def: 0, lv: 'scene', label: 'Orbit speed' },
+  ]},
+];
+const DEF = { colorA: '#ffffff', colorB: '#d9e0ff' };
+const SPEC = {};
+for (const s of SCHEMA) for (const it of s.items) { if ('def' in it) DEF[it.k] = it.def; SPEC[it.k] = it; }
+SPEC.colorA = { k: 'colorA', lv: 'geo' }; SPEC.colorB = { k: 'colorB', lv: 'geo' };
+
+function matValues(key) { const m = MATS[key] || {}; const o = {}; for (const k of MAT_KEYS) if (k in m) o[k] = m[k]; return o; }
+
+const PRESETS = {
+  'Liquid chrome': { material: 'chrome' },
+  'Glass slab': { material: 'glass', roundness: 0.22, depth: 0.9, noise: 0.08, bg: '#e7eaee', backdrop: 'checker', bdColor: '#2b3cff', bdDist: 6, colorB: '#e9f4ff' },
+  'Clay relief': { mode: 'relief', material: 'clay', depth: 0.7, roundness: 0.4, smooth: 3, noise: 0.12, speed: 0.15, bg: '#cbbba8', backdrop: 'none', light: 120, bend: 0.12, cam: [0.2, -0.35, 1] },
+  'Velvet balloon': { material: 'velvet', roundness: 0.9, depth: 1.5, noise: 0.25, bg: '#e9d7df', backdrop: 'gradient', bdColor: '#7a2850' },
+  'Voxel bloom': { mode: 'voxels', shape: 'sphere', material: 'iridescent', res: 110, size: 0.85, depth: 0.5, noise: 0.6, bg: '#101114', backdrop: 'none', exposure: 1.1 },
+  'Tumbling blocks': { mode: 'voxels', shape: 'box', material: 'plastic', res: 72, size: 0.92, depth: 0.22, roundness: 0.2, spin: 1.2, scatter: 0.6, noise: 0.3, speed: 0.5, bg: '#f1f2f4', backdrop: 'grid', bdColor: '#c4c9d2', gradDir: 'y' },
+  'Gold ring': { mode: 'voxels', shape: 'cylinder', material: 'gold', res: 120, size: 0.8, depth: 0.5, bend: 1, noise: 0.05, autoRotate: 0.8, bg: '#141210', backdrop: 'none', cam: [0.4, 0.35, 1] },
+  'Signal terrain': { mode: 'contours', lineStep: 2, depth: 1.8, roundness: 0.5, wave: 0.25, noise: 0.35, bg: '#0d0f13', backdrop: 'none', colorA: '#69e2ff', colorB: '#ff4fa3', opacity: 0.9, glow: true, cam: [0, -0.9, 0.55] },
+  'Echo stack': { mode: 'slices', layers: 28, spacing: 0.16, layerRot: 2, opacity: 0.16, glow: true, noise: 0.15, bg: '#111216', backdrop: 'none', colorA: '#ff5f3a', colorB: '#5a6bff', cam: [0.7, 0.25, 0.75] },
+  'Particle drift': { mode: 'particles', perCell: 5, pointSize: 0.11, opacity: 1, noise: 0.8, noiseScale: 0.5, speed: 0.3, glow: true, bg: '#0b0c10', backdrop: 'none', colorA: '#ffffff', colorB: '#7d8cff', gradDir: 'depth' },
+};
+function presetValues(name) {
+  const pr = PRESETS[name] || {};
+  const v = Object.assign({}, DEF, matValues(pr.material || DEF.material), pr);
+  delete v.cam; return v;
+}
+
+/* ----------------------------------------------------------------- state */
+const STORE = 'glyph-matter:v1';
+let P = presetValues('Liquid chrome');
+try {
+  const saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+  if (saved && typeof saved === 'object') for (const k in DEF) if (k in saved) P[k] = saved[k];
+} catch {}
+let saveTimer = 0;
+function persist() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { try { localStorage.setItem(STORE, JSON.stringify(P)); } catch {} }, 400); }
+
+/* ---------------------------------------------------------------- noise */
+const PERM = new Uint8Array(512);
+(() => { const p = [...Array(256).keys()]; let s = 1337; for (let i = 255; i > 0; i--) { s = (s * 16807) % 2147483647; const j = s % (i + 1); [p[i], p[j]] = [p[j], p[i]]; } for (let i = 0; i < 512; i++) PERM[i] = p[i & 255]; })();
+function noise3(x, y, z) {
+  const X = Math.floor(x), Y = Math.floor(y), Z = Math.floor(z);
+  x -= X; y -= Y; z -= Z;
+  const xi = X & 255, yi = Y & 255, zi = Z & 255;
+  const u = x * x * x * (x * (x * 6 - 15) + 10), v = y * y * y * (y * (y * 6 - 15) + 10), w = z * z * z * (z * (z * 6 - 15) + 10);
+  const A = PERM[xi] + yi, AA = PERM[A] + zi, AB = PERM[A + 1] + zi, B = PERM[xi + 1] + yi, BA = PERM[B] + zi, BB = PERM[B + 1] + zi;
+  const l1 = PERM[AA] + u * (PERM[BA] - PERM[AA]), l2 = PERM[AB] + u * (PERM[BB] - PERM[AB]);
+  const l3 = PERM[AA + 1] + u * (PERM[BA + 1] - PERM[AA + 1]), l4 = PERM[AB + 1] + u * (PERM[BB + 1] - PERM[AB + 1]);
+  const m1 = l1 + v * (l2 - l1), m2 = l3 + v * (l4 - l3);
+  return (m1 + w * (m2 - m1)) / 127.5 - 1;
+}
+
+/* --------------------------------------------------------------- three */
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(P.fov, 1, 0.05, 400);
+camera.position.set(0, 0, 22);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const key = new THREE.DirectionalLight(0xffffff, 2.2); scene.add(key);
+const fill = new THREE.HemisphereLight(0xffffff, 0x404050, 0.5); scene.add(fill);
+
+let backdrop = null, backdropKey = '';
+function makeBackdropTex(kind, c1, c2) {
+  const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d');
+  x.fillStyle = c1; x.fillRect(0, 0, 512, 512); x.fillStyle = c2; x.strokeStyle = c2;
+  if (kind === 'stripes') for (let i = 0; i < 16; i += 2) x.fillRect(i * 32, 0, 32, 512);
+  if (kind === 'checker') for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) if ((i + j) % 2) x.fillRect(i * 64, j * 64, 64, 64);
+  if (kind === 'dots') for (let j = 0; j < 8; j++) for (let i = 0; i < 8; i++) { x.beginPath(); x.arc(i * 64 + 32, j * 64 + 32, 14, 0, 7); x.fill(); }
+  if (kind === 'grid') { x.lineWidth = 3; for (let i = 0; i <= 8; i++) { x.beginPath(); x.moveTo(i * 64, 0); x.lineTo(i * 64, 512); x.moveTo(0, i * 64); x.lineTo(512, i * 64); x.stroke(); } }
+  if (kind === 'gradient') { const g = x.createRadialGradient(256, 256, 10, 256, 256, 360); g.addColorStop(0, c1); g.addColorStop(1, c2); x.fillStyle = g; x.fillRect(0, 0, 512, 512); }
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  if (kind !== 'gradient') t.repeat.set(5, 3.2); t.anisotropy = 4;
+  return t;
+}
+
+/* ---------------------------------------------------------------- glyphs */
+const gCan = document.createElement('canvas');
+const gCtx = gCan.getContext('2d', { willReadFrequently: true });
+function renderGlyphs() {
+  const fs = 200, lines = (P.text && P.text.length ? P.text : ' ').split('\n');
+  const font = `${P.weight} ${fs}px "${P.font}", sans-serif`;
+  gCtx.font = font;
+  const track = P.tracking * fs;
+  const info = lines.map(line => {
+    const chars = [...line]; const xs = []; let acc = '';
+    for (let i = 0; i < chars.length; i++) { xs.push(gCtx.measureText(acc).width + track * i); acc += chars[i]; }
+    const w = chars.length ? gCtx.measureText(acc).width + track * (chars.length - 1) : 0;
+    return { chars, xs, w };
+  });
+  const maxW = Math.max(fs * 0.6, ...info.map(l => l.w));
+  const pad = fs * 0.42, lineH = fs * P.leading;
+  const W = maxW + pad * 2, H = fs * 1.2 + lineH * (lines.length - 1) + pad * 2;
+  const s = Math.min(1, 2600 / W, 2600 / H);
+  gCan.width = Math.ceil(W * s); gCan.height = Math.ceil(H * s);
+  gCtx.setTransform(s, 0, 0, s, 0, 0);
+  gCtx.clearRect(0, 0, W, H);
+  gCtx.font = font; gCtx.fillStyle = '#fff'; gCtx.textBaseline = 'middle';
+  info.forEach((L, li) => {
+    const x0 = (W - L.w) / 2, y = pad + fs * 0.6 + li * lineH;
+    if (track === 0) gCtx.fillText(L.chars.join(''), x0, y);
+    else L.chars.forEach((ch, i) => gCtx.fillText(ch, x0 + L.xs[i], y));
+  });
+  gCtx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+/* ----------------------------------------------------------------- field */
+let G = null;
+function buildField() {
+  const cw = gCan.width, ch = gCan.height;
+  const img = gCtx.getImageData(0, 0, cw, ch).data;
+  const cols = P.res | 0, cell = cw / cols, rows = Math.max(2, Math.round(ch / cell));
+  const n = cols * rows;
+  const inside = new Uint8Array(n), dist = new Float32Array(n), prof = new Float32Array(n);
+  const q = cell * 0.25; let count = 0;
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const cx = (i + 0.5) * cell, cy = (j + 0.5) * cell; let a = 0;
+    for (const [ox, oy] of [[-q, -q], [q, -q], [-q, q], [q, q]]) {
+      const px = Math.min(cw - 1, Math.max(0, Math.round(cx + ox))), py = Math.min(ch - 1, Math.max(0, Math.round(cy + oy)));
+      a += img[(py * cw + px) * 4 + 3];
+    }
+    const k = j * cols + i;
+    if (a / 1020 > 0.5) { inside[k] = 1; dist[k] = 1e9; count++; }
+  }
+  const D = Math.SQRT2;
+  const at = (i, j) => (i < 0 || j < 0 || i >= cols || j >= rows) ? 0 : dist[j * cols + i];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const k = j * cols + i; if (!inside[k]) continue;
+    dist[k] = Math.min(dist[k], at(i - 1, j) + 1, at(i, j - 1) + 1, at(i - 1, j - 1) + D, at(i + 1, j - 1) + D);
+  }
+  let maxD = 1;
+  for (let j = rows - 1; j >= 0; j--) for (let i = cols - 1; i >= 0; i--) {
+    const k = j * cols + i; if (!inside[k]) continue;
+    dist[k] = Math.min(dist[k], at(i + 1, j) + 1, at(i, j + 1) + 1, at(i + 1, j + 1) + D, at(i - 1, j + 1) + D);
+    if (dist[k] > maxD) maxD = dist[k];
+  }
+  const norm = Math.max(0.5, maxD - 0.5), rnd = Math.max(0.01, P.roundness);
+  for (let k = 0; k < n; k++) if (inside[k]) {
+    const t = Math.min(1, ((dist[k] - 0.5) / norm) / rnd);
+    prof[k] = Math.sqrt(1 - (1 - t) * (1 - t));
+  }
+  const tmp = new Float32Array(n);
+  for (let s = 0; s < P.smooth; s++) {
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+      let sum = 0, c = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ii = i + di, jj = j + dj; if (ii < 0 || jj < 0 || ii >= cols || jj >= rows) continue;
+        sum += prof[jj * cols + ii]; c++;
+      }
+      tmp[j * cols + i] = sum / c;
+    }
+    prof.set(tmp);
+  }
+  const kW = Math.min(12 / cw, 7 / ch), cellW = cell * kW;
+  G = { cols, rows, cellW, WW: cols * cellW, HH: rows * cellW, CW: cw * kW, CH: ch * kW, inside, prof, count,
+        x0: -cols * cellW / 2 + cellW / 2, y0: rows * cellW / 2 - cellW / 2 };
+  // Snap the outer ring of grid points onto the true glyph outline so surfaces get smooth silhouettes.
+  const ex = new Float32Array(n), ey = new Float32Array(n);
+  const alphaAt = (px, py) => img[(Math.min(ch - 1, Math.max(0, py | 0)) * cw + Math.min(cw - 1, Math.max(0, px | 0))) * 4 + 3];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const k = j * cols + i; let gx = i, gy = j;
+    if (!inside[k]) {
+      let sx = 0, sy = 0, c = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const ii = i + di, jj = j + dj;
+        if (ii >= 0 && jj >= 0 && ii < cols && jj < rows && inside[jj * cols + ii]) { sx += di; sy += dj; c++; }
+      }
+      if (c) {
+        let dx = sx / c, dy = sy / c; const L = Math.hypot(dx, dy) || 1; dx /= L; dy /= L;
+        const cx = (i + 0.5) * cell, cy = (j + 0.5) * cell; let prev = 0;
+        for (let s = 1; s <= 24; s++) {
+          const f = s / 24 * 1.5, a = alphaAt(cx + dx * f * cell, cy + dy * f * cell);
+          if (a >= 128) { const fa = (s - 1) / 24 * 1.5, ff = fa + (f - fa) * (128 - prev) / Math.max(1, a - prev); gx = i + dx * ff; gy = j + dy * ff; break; }
+          prev = a;
+        }
+      }
+    }
+    ex[k] = G.x0 + gx * cellW; ey[k] = G.y0 - gy * cellW;
+  }
+  G.ex = ex; G.ey = ey;
+}
+
+/* --------------------------------------------------------------- deform */
+let DX = 0, DY = 0, DZ = 0, AT = 0, AB = 0;
+function deform(x, y, z, sx, sy, sz, t) {
+  AT = 0; AB = 0;
+  if (P.scatter) { x += sx * P.scatter; y += sy * P.scatter; z += sz * P.scatter; }
+  if (P.skew) x += y * P.skew;
+  if (P.noise) {
+    const s = P.noiseScale, a = P.noise;
+    const nx = noise3(x * s + t, y * s, z * s + 17.1), ny = noise3(x * s, y * s - t, z * s + 31.7), nz = noise3(x * s + 5.2, y * s + t * 0.7, z * s + 47.3);
+    x += a * 0.5 * nx; y += a * 0.5 * ny; z += a * nz;
+  }
+  if (P.wave) z += P.wave * Math.sin(x * P.waveFreq + t * 2) * Math.cos(y * P.waveFreq * 0.6 - t);
+  if (P.twist) {
+    const a = P.twist * x / (G.WW / 2), c = Math.cos(a), s = Math.sin(a);
+    const ny = y * c - z * s; z = y * s + z * c; y = ny; AT = a;
+  }
+  if (Math.abs(P.bend) > 0.002) {
+    const R = G.WW / (P.bend * Math.PI * 2), a = x / R;
+    x = (R + z) * Math.sin(a); z = (R + z) * Math.cos(a) - R; AB = a;
+  }
+  DX = x; DY = y; DZ = z;
+}
+
+/* --------------------------------------------------------------- colour */
+const cA = new THREE.Color(), cB = new THREE.Color(), cT = new THREE.Color();
+function gradT(x, y, z, zMax) {
+  let t;
+  switch (P.gradDir) {
+    case 'x': t = x / G.WW + 0.5; break;
+    case 'y': t = 1 - (y / G.HH + 0.5); break;
+    case 'depth': t = zMax > 0 ? Math.abs(z) / zMax : 0; break;
+    case 'radial': t = Math.hypot(x, y * 1.4) / (G.WW / 2); break;
+    case 'noise': t = noise3(x * 0.45, y * 0.45, 3.7) * 0.9 + 0.5; break;
+    default: t = 0;
+  }
+  return Math.min(1, Math.max(0, t));
+}
+function colorAt(x, y, z, zMax) { return cT.lerpColors(cA, cB, gradT(x, y, z, zMax)); }
+
+/* ------------------------------------------------------------- material */
+function makeMeshMaterial(vertexColors) {
+  const m = MATS[P.material] || MATS.chrome;
+  const common = { side: THREE.DoubleSide, flatShading: !!P.flat, wireframe: !!P.wireframe };
+  if (m.type === 'normal') return new THREE.MeshNormalMaterial(common);
+  if (m.type === 'toon') return new THREE.MeshToonMaterial({ ...common, vertexColors });
+  if (m.type === 'wire') return new THREE.MeshBasicMaterial({ ...common, wireframe: true, vertexColors });
+  return new THREE.MeshPhysicalMaterial({
+    ...common, vertexColors, color: 0xffffff,
+    metalness: P.metalness, roughness: P.roughness, envMapIntensity: P.envInt,
+    transmission: P.transmission, thickness: 1.4, ior: 1.5, dispersion: P.transmission * 4,
+    iridescence: P.iridescence, iridescenceIOR: 1.35, iridescenceThicknessRange: [120, 520],
+    clearcoat: P.clearcoat, clearcoatRoughness: 0.08,
+    sheen: P.sheen, sheenRoughness: 0.5, sheenColor: new THREE.Color(P.colorB),
+  });
+}
+
+/* --------------------------------------------------------------- forms */
+function disposeObj(o) {
+  o.traverse(c => {
+    if (c.geometry) c.geometry.dispose();
+    const ms = Array.isArray(c.material) ? c.material : c.material ? [c.material] : [];
+    for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); }
+  });
+}
+
+function buildSurface(balloon) {
+  const { cols, rows, prof, inside } = G, n = cols * rows, nv = balloon ? n * 2 : n;
+  const depth = balloon ? Math.max(0.02, Math.abs(P.depth)) : P.depth;
+  const base = new Float32Array(nv * 3), pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const k = j * cols + i, x = G.ex[k], y = G.ey[k];
+    const h = (balloon && !inside[k]) ? 0 : prof[k] * depth;
+    base.set([x, y, h], k * 3);
+    colorAt(x, y, h, Math.abs(depth)).toArray(col, k * 3);
+    if (balloon) { base.set([x, y, -h], (k + n) * 3); col.set(col.subarray(k * 3, k * 3 + 3), (k + n) * 3); }
+  }
+  const idx = [];
+  for (let j = 0; j < rows - 1; j++) for (let i = 0; i < cols - 1; i++) {
+    const a = j * cols + i, b = a + 1, c = a + cols, d = c + 1;
+    if (balloon && !(inside[a] || inside[b] || inside[c] || inside[d])) continue;
+    idx.push(a, c, b, b, c, d);
+    if (balloon) idx.push(a + n, b + n, c + n, b + n, d + n, c + n);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+  const mesh = new THREE.Mesh(geo, makeMeshMaterial(true)); mesh.frustumCulled = false;
+  return {
+    obj: mesh, label: `${(idx.length / 3).toLocaleString()} triangles`,
+    setMaterial() { mesh.material.dispose(); mesh.material = makeMeshMaterial(true); },
+    update(t) {
+      for (let v = 0; v < nv; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], 0, 0, 0, t); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
+      geo.attributes.position.needsUpdate = true; geo.computeVertexNormals();
+    },
+  };
+}
+
+function voxelGeometry(shape) {
+  switch (shape) {
+    case 'sphere': return new THREE.SphereGeometry(0.5, 14, 10);
+    case 'cylinder': return new THREE.CylinderGeometry(0.5, 0.5, 1, 14).rotateX(Math.PI / 2);
+    case 'octa': return new THREE.OctahedronGeometry(0.62);
+    case 'torus': return new THREE.TorusGeometry(0.36, 0.14, 8, 18);
+    case 'cone': return new THREE.ConeGeometry(0.45, 1, 12).rotateX(Math.PI / 2);
+    default: return new THREE.BoxGeometry(1, 1, 1);
+  }
+}
+const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(), _p = new THREE.Vector3(), _s = new THREE.Vector3();
+function buildVoxels() {
+  const { cols, rows, prof, inside } = G, cap = 40000;
+  const cells = [];
+  for (let k = 0; k < cols * rows; k++) if (inside[k]) cells.push(k);
+  const step = Math.max(1, Math.ceil(cells.length / cap)), list = cells.filter((_, i) => i % step === 0);
+  const N = list.length, stretch = P.shape === 'box' || P.shape === 'cylinder';
+  const depth = Math.abs(P.depth);
+  const bx = new Float32Array(N), by = new Float32Array(N), bh = new Float32Array(N), sc = new Float32Array(N * 3);
+  const mesh = new THREE.InstancedMesh(voxelGeometry(P.shape), makeMeshMaterial(false), Math.max(1, N));
+  mesh.count = N; mesh.frustumCulled = false; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  list.forEach((k, n) => {
+    const i = k % cols, j = (k / cols) | 0;
+    bx[n] = G.x0 + i * G.cellW; by[n] = G.y0 - j * G.cellW; bh[n] = prof[k] * depth;
+    const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 2 - 1), r = Math.random();
+    sc[n * 3] = Math.sin(ph) * Math.cos(th) * r; sc[n * 3 + 1] = Math.sin(ph) * Math.sin(th) * r; sc[n * 3 + 2] = Math.cos(ph) * r;
+    mesh.setColorAt(n, colorAt(bx[n], by[n], bh[n], depth));
+  });
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  return {
+    obj: mesh, label: `${N.toLocaleString()} ${P.shape === 'box' ? 'cubes' : 'elements'}${step > 1 ? ' (thinned)' : ''}`,
+    setMaterial() { mesh.material.dispose(); mesh.material = makeMeshMaterial(false); },
+    update(t) {
+      const cs = G.cellW * P.size;
+      for (let n = 0; n < N; n++) {
+        const z = stretch ? 0 : bh[n];
+        deform(bx[n], by[n], z, sc[n * 3], sc[n * 3 + 1], sc[n * 3 + 2], t);
+        _p.set(DX, DY, DZ);
+        let rx = AT, ry = AB, rz = 0;
+        if (P.spin) {
+          const s = 0.35;
+          rx += P.spin * noise3(bx[n] * s + t * 0.6, by[n] * s, 1.3) * 2;
+          ry += P.spin * noise3(bx[n] * s, by[n] * s + t * 0.6, 7.9) * 2;
+          rz += P.spin * noise3(bx[n] * s - t * 0.4, by[n] * s, 13.1) * 2;
+        }
+        _q.setFromEuler(_e.set(rx, ry, rz));
+        if (stretch) _s.set(cs, cs, Math.max(cs * 0.25, bh[n] * 2)); else _s.set(cs, cs, cs);
+        mesh.setMatrixAt(n, _m.compose(_p, _q, _s));
+      }
+      mesh.instanceMatrix.needsUpdate = true;
+    },
+  };
+}
+
+let dotTex = null;
+function getDotTex() {
+  if (dotTex) return dotTex;
+  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.45, 'rgba(255,255,255,0.9)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64);
+  dotTex = new THREE.CanvasTexture(c); return dotTex;
+}
+function buildParticles() {
+  const { cols, rows, prof, inside } = G, per = P.perCell | 0, depth = Math.abs(P.depth);
+  let N = 0; for (let k = 0; k < cols * rows; k++) if (inside[k]) N += per;
+  N = Math.min(N, 160000);
+  const base = new Float32Array(N * 3), sc = new Float32Array(N * 3), pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  let n = 0;
+  outer: for (let k = 0; k < cols * rows; k++) {
+    if (!inside[k]) continue;
+    const i = k % cols, j = (k / cols) | 0, H = prof[k] * depth;
+    for (let r = 0; r < per; r++) {
+      if (n >= N) break outer;
+      const x = G.x0 + (i + Math.random() - 0.5) * G.cellW, y = G.y0 - (j + Math.random() - 0.5) * G.cellW, z = (Math.random() * 2 - 1) * H;
+      base.set([x, y, z], n * 3);
+      const th = Math.random() * 6.283, ph = Math.acos(Math.random() * 2 - 1), rr = Math.random();
+      sc.set([Math.sin(ph) * Math.cos(th) * rr, Math.sin(ph) * Math.sin(th) * rr, Math.cos(ph) * rr], n * 3);
+      colorAt(x, y, z, depth).toArray(col, n * 3); n++;
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({ size: P.pointSize, vertexColors: true, map: getDotTex(), transparent: true, opacity: P.opacity,
+    depthWrite: !P.glow, blending: P.glow ? THREE.AdditiveBlending : THREE.NormalBlending, alphaTest: P.glow ? 0 : 0.2 });
+  const pts = new THREE.Points(geo, mat); pts.frustumCulled = false;
+  return {
+    obj: pts, label: `${n.toLocaleString()} particles`, setMaterial() {},
+    update(t) {
+      for (let v = 0; v < n; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], sc[o], sc[o + 1], sc[o + 2], t); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
+      geo.attributes.position.needsUpdate = true;
+    },
+  };
+}
+
+function buildContours() {
+  const { cols, rows, prof } = G, n = cols * rows, st = Math.max(1, P.lineStep | 0);
+  const base = new Float32Array(n * 3), pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const k = j * cols + i, x = G.x0 + i * G.cellW, y = G.y0 - j * G.cellW, z = prof[k] * P.depth;
+    base.set([x, y, z], k * 3); colorAt(x, y, z, Math.abs(P.depth)).toArray(col, k * 3);
+  }
+  const idx = [], on = k => !P.insideOnly || prof[k] > 0.002;
+  if (P.lineDir !== 'cols') for (let j = 0; j < rows; j += st) for (let i = 0; i < cols - 1; i++) { const a = j * cols + i; if (on(a) || on(a + 1)) idx.push(a, a + 1); }
+  if (P.lineDir !== 'rows') for (let i = 0; i < cols; i += st) for (let j = 0; j < rows - 1; j++) { const a = j * cols + i; if (on(a) || on(a + cols)) idx.push(a, a + cols); }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(new THREE.BufferAttribute(n > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
+  const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: P.opacity, depthWrite: !P.glow, blending: P.glow ? THREE.AdditiveBlending : THREE.NormalBlending });
+  const lines = new THREE.LineSegments(geo, mat); lines.frustumCulled = false;
+  return {
+    obj: lines, label: `${(idx.length / 2).toLocaleString()} line segments`, setMaterial() {},
+    update(t) {
+      for (let v = 0; v < n; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], 0, 0, 0, t); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
+      geo.attributes.position.needsUpdate = true;
+    },
+  };
+}
+
+function buildSlices() {
+  const N = P.layers | 0, group = new THREE.Group();
+  const tex = new THREE.CanvasTexture(gCan); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const segX = Math.min(90, Math.max(8, Math.round(G.cols / 2))), segY = Math.max(2, Math.round(segX * G.CH / G.CW));
+  const layers = [];
+  for (let i = 0; i < N; i++) {
+    const tl = N > 1 ? i / (N - 1) : 0, c = i - (N - 1) / 2;
+    const geo = new THREE.PlaneGeometry(G.CW, G.CH, segX, segY);
+    const pa = geo.attributes.position; pa.setUsage(THREE.DynamicDrawUsage);
+    const base = new Float32Array(pa.array.length);
+    const rot = c * P.layerRot * Math.PI / 180, cs = Math.cos(rot), sn = Math.sin(rot), sc = Math.max(0.05, 1 + c * P.layerScale), z = c * P.spacing;
+    for (let v = 0; v < pa.count; v++) {
+      const x = pa.array[v * 3] * sc, y = pa.array[v * 3 + 1] * sc;
+      base[v * 3] = x * cs - y * sn; base[v * 3 + 1] = x * sn + y * cs; base[v * 3 + 2] = z;
+    }
+    const mat = new THREE.MeshBasicMaterial({ map: tex, color: cT.lerpColors(cA, cB, P.gradDir === 'none' ? 0 : tl).clone(), transparent: true,
+      opacity: P.opacity, side: THREE.DoubleSide, depthWrite: false, blending: P.glow ? THREE.AdditiveBlending : THREE.NormalBlending });
+    const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = i;
+    group.add(mesh); layers.push({ geo, base });
+  }
+  return {
+    obj: group, label: `${N} layers`, setMaterial() {},
+    update(t) {
+      for (const L of layers) {
+        const a = L.geo.attributes.position, arr = a.array, b = L.base;
+        for (let v = 0; v < a.count; v++) { const o = v * 3; deform(b[o], b[o + 1], b[o + 2], 0, 0, 0, t); arr[o] = DX; arr[o + 1] = DY; arr[o + 2] = DZ; }
+        a.needsUpdate = true;
+      }
+    },
+    dispose() { tex.dispose(); },
+  };
+}
+
+let current = null;
+function buildGeometry() {
+  if (current) { scene.remove(current.obj); disposeObj(current.obj); current.dispose?.(); }
+  cA.set(P.colorA); cB.set(P.colorB);
+  const b = { inflate: () => buildSurface(true), relief: () => buildSurface(false), voxels: buildVoxels, particles: buildParticles, contours: buildContours, slices: buildSlices }[P.mode] || (() => buildSurface(true));
+  current = b(); scene.add(current.obj);
+  setStatus(G.count ? `${current.label} · ${G.cols}×${G.rows} grid` : 'No filled glyph area — type something or lower the tracking');
+}
+
+/* ----------------------------------------------------------------- scene */
+let lastFov = P.fov;
+function applyScene() {
+  scene.background = new THREE.Color(P.bg);
+  renderer.toneMappingExposure = P.exposure;
+  const a = P.light * Math.PI / 180; key.position.set(Math.sin(a) * 10, 7, Math.cos(a) * 10);
+  if (P.fov !== lastFov) {
+    const dir = camera.position.clone().sub(controls.target);
+    dir.multiplyScalar(Math.tan(lastFov * Math.PI / 360) / Math.tan(P.fov * Math.PI / 360));
+    camera.position.copy(controls.target).add(dir); camera.fov = P.fov; camera.updateProjectionMatrix(); lastFov = P.fov;
+  }
+  controls.autoRotate = P.autoRotate !== 0; controls.autoRotateSpeed = P.autoRotate * 2;
+  const bk = `${P.backdrop}|${P.bg}|${P.bdColor}`;
+  if (bk !== backdropKey) {
+    if (backdrop) { scene.remove(backdrop); disposeObj(backdrop); backdrop = null; }
+    if (P.backdrop !== 'none') {
+      backdrop = new THREE.Mesh(new THREE.PlaneGeometry(90, 56), new THREE.MeshBasicMaterial({ map: makeBackdropTex(P.backdrop, P.bg, P.bdColor) }));
+      scene.add(backdrop);
+    }
+    backdropKey = bk;
+  }
+  if (backdrop) backdrop.position.z = -P.bdDist;
+}
+function fitView(dirOverride) {
+  if (!G) return;
+  const aspect = camera.aspect || 1, tv = Math.tan(camera.fov * Math.PI / 360);
+  const d = Math.max((G.HH * 1.35) / 2 / tv, (G.WW * 1.2) / 2 / (tv * aspect)) + Math.abs(P.depth);
+  const dir = dirOverride ? new THREE.Vector3(...dirOverride).normalize() : camera.position.clone().sub(controls.target).normalize();
+  if (!isFinite(dir.x) || dir.lengthSq() === 0) dir.set(0, 0, 1);
+  controls.target.set(0, 0, 0); camera.position.copy(dir.multiplyScalar(d));
+}
+
+/* ----------------------------------------------------------------- queue */
+const LV = { live: 0, scene: 1, mat: 2, geo: 3, field: 4, glyph: 5 };
+let pend = -1, dirty = true, glyphToken = 0, fitNext = null, firstFit = true;
+function req(l) { pend = Math.max(pend, LV[l]); }
+function processQueue() {
+  if (pend < 0) return;
+  const l = pend; pend = -1;
+  if (l >= 5) { rebuildGlyph(); return; }
+  if (l >= 4) buildField();
+  if (l >= 3) buildGeometry();
+  else if (l >= 2) current?.setMaterial();
+  if (l >= 1) applyScene();
+  if (fitNext) { fitView(fitNext === true ? (firstFit ? [0, 0, 1] : null) : fitNext); fitNext = null; firstFit = false; }
+  dirty = true;
+}
+async function rebuildGlyph() {
+  const tok = ++glyphToken, fam = P.font;
+  setStatus(`Loading ${fam}…`);
+  let ok = true;
+  try {
+    await ensureFont(fam);
+    await Promise.race([document.fonts.load(`${P.weight} 200px "${fam}"`, (P.text || 'A').replace(/\n/g, '')), new Promise(r => setTimeout(r, 6000))]);
+    ok = document.fonts.check(`${P.weight} 200px "${fam}"`);
+  } catch { ok = false; }
+  if (tok !== glyphToken) return;
+  renderGlyphs(); req('field'); if (!fitNext) fitNext = true;
+  if (!ok) setTimeout(() => setStatus(`Couldn't load “${fam}” from Google Fonts. Check the spelling; showing a fallback face.`, true), 0);
+}
+
+/* ------------------------------------------------------------------- UI */
+const statusEl = document.getElementById('status');
+function setStatus(t, warn) { statusEl.textContent = t; statusEl.classList.toggle('warn', !!warn); }
+
+const ctl = {};
+const h = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else if (v !== false && v != null) e.setAttribute(k, v === true ? '' : v); }
+  for (const c of kids.flat()) if (c != null) e.append(c);
+  return e;
+};
+function fmt(spec, v) {
+  const d = spec.step >= 1 ? 0 : spec.step >= 0.1 ? 1 : spec.step >= 0.01 ? 2 : 3;
+  return Number(v).toFixed(d) + (spec.unit || '');
+}
+function set(k, v, lv) {
+  P[k] = v; persist();
+  req(lv || SPEC[k]?.lv || 'live'); dirty = true;
+}
+function fillRange(inp) { const p = (inp.value - inp.min) / (inp.max - inp.min) * 100; inp.style.setProperty('--fill', p + '%'); }
+
+function buildUI() {
+  const root = document.getElementById('controls');
+  for (const sec of SCHEMA) {
+    const body = h('div', { class: 'sec-body' });
+    root.append(h('details', { class: 'sec', open: true }, h('summary', {}, sec.sec), body));
+    for (const it of sec.items) {
+      const id = 'c-' + it.k; let node;
+      if (it.type === 'range') {
+        const inp = h('input', { type: 'range', id, min: it.min, max: it.max, step: it.step });
+        const out = h('output', { for: id });
+        const lab = h('span', { title: 'Double-click to reset' }, it.label);
+        lab.addEventListener('dblclick', () => { inp.value = DEF[it.k]; inp.dispatchEvent(new Event('input')); });
+        inp.addEventListener('input', () => { const v = parseFloat(inp.value); out.textContent = fmt(it, v); fillRange(inp); set(it.k, v); });
+        node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, lab, out), inp);
+        ctl[it.k] = { node, sync() { inp.value = P[it.k]; out.textContent = fmt(it, P[it.k]); fillRange(inp); }, spec: it };
+      } else if (it.type === 'toggle') {
+        const inp = h('input', { type: 'checkbox', id });
+        inp.addEventListener('change', () => set(it.k, inp.checked));
+        node = h('div', { class: 'ctl inline' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label)), h('span', { class: 'switch' }, inp, h('i')));
+        ctl[it.k] = { node, sync() { inp.checked = !!P[it.k]; }, spec: it };
+      } else if (it.type === 'select') {
+        const sel = h('select', { id }, it.options.map(([v, l]) => h('option', { value: v }, l)));
+        sel.addEventListener('change', () => {
+          if (it.lv === 'matpreset') { P.material = sel.value; Object.assign(P, matValues(sel.value)); syncUI(); persist(); req('geo'); }
+          else set(it.k, sel.value);
+        });
+        node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label)), sel);
+        ctl[it.k] = { node, sync() { sel.value = P[it.k]; }, spec: it };
+      } else if (it.type === 'color') {
+        const inp = h('input', { type: 'color', id });
+        inp.addEventListener('input', () => set(it.k, inp.value));
+        node = h('div', { class: 'ctl inline' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label)), inp);
+        ctl[it.k] = { node, sync() { inp.value = P[it.k]; }, spec: it };
+      } else if (it.type === 'colors') {
+        const a = h('input', { type: 'color', id: 'c-colorA' }), b = h('input', { type: 'color', id: 'c-colorB' });
+        a.addEventListener('input', () => set('colorA', a.value)); b.addEventListener('input', () => set('colorB', b.value));
+        node = h('div', { class: 'colors' },
+          h('div', { class: 'ctl inline' }, h('label', { class: 'lbl', for: 'c-colorA' }, h('span', {}, 'Colour A')), a),
+          h('div', { class: 'ctl inline' }, h('label', { class: 'lbl', for: 'c-colorB' }, h('span', {}, 'Colour B')), b));
+        ctl.colors = { node, sync() { a.value = P.colorA; b.value = P.colorB; }, spec: it };
+      } else if (it.type === 'textarea') {
+        const ta = h('textarea', { id, rows: 2, spellcheck: 'false' });
+        let tt = 0; ta.addEventListener('input', () => { clearTimeout(tt); tt = setTimeout(() => set('text', ta.value), 180); });
+        node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label), h('output', {}, 'Enter = new line')), ta);
+        ctl.text = { node, sync() { if (document.activeElement !== ta) ta.value = P.text; }, spec: it };
+      } else if (it.type === 'font') {
+        const sel = h('select', { id, 'aria-label': 'Typeface' });
+        const cat = h('output', {});
+        const fillSel = () => {
+          sel.replaceChildren(...FONTS.map(([c, list]) => h('optgroup', { label: c }, list.map(([n]) => h('option', { value: n }, n)))));
+          if (customFonts.length) sel.append(h('optgroup', { label: 'Loaded by name' }, customFonts.map(n => h('option', { value: n }, n))));
+        };
+        const pick = n => { if (!FONT_SPEC.has(n) && !customFonts.includes(n)) { customFonts.push(n); fillSel(); } set('font', n); syncUI(); };
+        const allFonts = () => [...FONT_ORDER, ...customFonts];
+        const stepFont = d => { const a = allFonts(); const i = a.indexOf(P.font); pick(a[(i + d + a.length) % a.length]); };
+        sel.addEventListener('change', () => pick(sel.value));
+        const custom = h('input', { type: 'text', id: 'c-fontcustom', placeholder: 'Any Google Font, e.g. Rubik Puddles', autocomplete: 'off' });
+        const load = () => { const n = custom.value.trim().replace(/\s+/g, ' '); if (n) { pick(n); custom.value = ''; } };
+        custom.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); load(); } });
+        node = h('div', { class: 'ctl' },
+          h('label', { class: 'lbl', for: id }, h('span', {}, 'Typeface'), cat),
+          h('div', { class: 'font-row' }, h('button', { class: 'btn icon', type: 'button', 'aria-label': 'Previous typeface', onclick: () => stepFont(-1) }, '‹'), sel, h('button', { class: 'btn icon', type: 'button', 'aria-label': 'Next typeface', onclick: () => stepFont(1) }, '›')),
+          h('div', { class: 'font-row' }, custom, h('button', { class: 'btn', type: 'button', onclick: load }, 'Load')));
+        ctl.font = { node, sync() { if (!FONT_SPEC.has(P.font) && !customFonts.includes(P.font)) { customFonts.push(P.font); fillSel(); } sel.value = P.font; cat.textContent = FONT_CAT.get(P.font) || 'Google Fonts'; }, spec: it };
+        fillSel();
+      } else if (it.type === 'modes') {
+        const btns = MODES.map(([v, l, d]) => {
+          const b = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { set('mode', v); syncUI(); } }, h('b', {}, l), h('small', {}, d));
+          b.dataset.v = v; return b;
+        });
+        node = h('div', { class: 'modes', role: 'group', 'aria-label': 'Form' }, btns);
+        ctl.mode = { node, sync() { btns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === P.mode))); }, spec: it };
+      }
+      body.append(node);
+    }
+  }
+}
+function syncUI() {
+  const mt = (MATS[P.material] || {}).type;
+  for (const k in ctl) {
+    const c = ctl[k]; c.sync();
+    let show = !c.spec.modes || c.spec.modes.includes(P.mode);
+    if (c.spec.mat && c.spec.mat !== mt) show = false;
+    if (k === 'bdColor' || k === 'bdDist') show = P.backdrop !== 'none';
+    c.node.hidden = !show;
+  }
+}
+
+/* --------------------------------------------------------------- presets */
+const presetSel = document.getElementById('presetSel');
+presetSel.append(h('option', { value: '' }, 'Presets…'), ...Object.keys(PRESETS).map(n => h('option', { value: n }, n)));
+function applyValues(v, cam) {
+  const keep = { text: P.text, font: P.font, weight: P.weight, tracking: P.tracking, leading: P.leading };
+  P = Object.assign({}, DEF, v, keep);
+  syncUI(); persist(); req('field'); fitNext = cam || true;
+}
+presetSel.addEventListener('change', () => {
+  const n = presetSel.value; if (!n) return;
+  applyValues(presetValues(n), PRESETS[n].cam || [0, 0, 1]); presetSel.value = '';
+});
+
+const rnd = (a, b) => a + Math.random() * (b - a), pickOne = a => a[(Math.random() * a.length) | 0];
+const hsl = (hh, s, l) => '#' + new THREE.Color().setHSL(hh, s, l).getHexString();
+function randomize() {
+  const mode = pickOne(MODES)[0], material = pickOne(Object.keys(MATS)), dark = Math.random() < 0.5, hue = Math.random();
+  const v = { ...P, ...matValues(material), mode, material,
+    depth: rnd(0.3, 2.2) * (mode === 'relief' && Math.random() < 0.3 ? -1 : 1), roundness: rnd(0.1, 1), smooth: (Math.random() * 4) | 0,
+    shape: pickOne(['box', 'sphere', 'cylinder', 'octa', 'torus', 'cone']), size: rnd(0.5, 1.4),
+    perCell: 2 + ((Math.random() * 4) | 0), pointSize: rnd(0.03, 0.12), lineStep: 1 + ((Math.random() * 4) | 0), lineDir: pickOne(['rows', 'cols', 'grid']),
+    layers: 8 + ((Math.random() * 36) | 0), spacing: rnd(0.04, 0.3), layerRot: rnd(-4, 4), layerScale: Math.random() < 0.5 ? 0 : rnd(-0.02, 0.02), opacity: rnd(0.2, 0.8), glow: dark,
+    noise: Math.random() < 0.25 ? 0 : rnd(0, 1.2), noiseScale: rnd(0.15, 0.8), speed: rnd(0, 0.8), wave: Math.random() < 0.6 ? 0 : rnd(0.1, 0.7), waveFreq: rnd(0.3, 2),
+    twist: Math.random() < 0.7 ? 0 : rnd(-1.5, 1.5), bend: Math.random() < 0.7 ? 0 : rnd(-1, 1), skew: Math.random() < 0.8 ? 0 : rnd(-0.5, 0.5),
+    scatter: Math.random() < 0.7 ? 0 : rnd(0.2, 2), spin: Math.random() < 0.6 ? 0 : rnd(0.2, 2),
+    gradDir: pickOne(['x', 'y', 'depth', 'radial', 'noise', 'none']),
+    bg: dark ? hsl(hue, rnd(0.1, 0.4), rnd(0.04, 0.12)) : hsl(hue, rnd(0.05, 0.35), rnd(0.78, 0.92)),
+    backdrop: pickOne(['none', 'none', 'stripes', 'checker', 'dots', 'grid', 'gradient']), bdColor: hsl(Math.random(), rnd(0.4, 0.9), rnd(0.3, 0.6)), bdDist: rnd(4, 14),
+    light: (Math.random() * 360) | 0, autoRotate: 0 };
+  if (!['chrome', 'iridescent', 'normal', 'glass'].includes(material) || Math.random() < 0.3) { v.colorA = hsl(hue + rnd(-0.1, 0.1), rnd(0.5, 1), rnd(0.45, 0.7)); v.colorB = hsl(hue + rnd(0.15, 0.5), rnd(0.5, 1), rnd(0.45, 0.75)); }
+  P = v; syncUI(); persist(); req('field');
+}
+document.getElementById('btnRandom').addEventListener('click', randomize);
+document.addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'r' || e.key === 'R') randomize();
+});
+document.getElementById('btnResetAll').addEventListener('click', () => { applyValues(presetValues('Liquid chrome'), [0, 0, 1]); Object.assign(P, { text: DEF.text, font: DEF.font, weight: DEF.weight, tracking: DEF.tracking, leading: DEF.leading }); syncUI(); req('glyph'); });
+document.getElementById('btnView').addEventListener('click', () => { fitView([0, 0, 1]); });
+
+/* ------------------------------------------------------------- dialogs */
+for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => b.closest('dialog').close());
+const inFrame = (() => { try { return window.self !== window.top; } catch { return true; } })();
+document.getElementById('btnSnap').addEventListener('click', () => {
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL('image/png');
+  document.getElementById('snapImg').src = url;
+  const dl = document.getElementById('snapDl'); dl.href = url; dl.hidden = inFrame;
+  document.getElementById('snapDlg').showModal();
+});
+const setText = document.getElementById('setText'), setMsg = document.getElementById('setMsg');
+document.getElementById('btnSettings').addEventListener('click', () => { setText.value = JSON.stringify(P, null, 2); setMsg.textContent = ''; document.getElementById('setDlg').showModal(); });
+document.getElementById('setCopy').addEventListener('click', () => {
+  navigator.clipboard?.writeText(setText.value).then(() => { setMsg.textContent = 'Copied to clipboard.'; }, () => { setText.select(); setMsg.textContent = 'Clipboard is blocked here. The text is selected; copy it with your keyboard.'; })
+    ?? (setText.select(), setMsg.textContent = 'The text is selected; copy it with your keyboard.');
+});
+document.getElementById('setApply').addEventListener('click', () => {
+  try {
+    const v = JSON.parse(setText.value); if (!v || typeof v !== 'object') throw 0;
+    const next = Object.assign({}, DEF); for (const k in DEF) if (k in v) next[k] = v[k];
+    P = next; syncUI(); persist(); req('glyph'); setMsg.textContent = 'Applied.';
+  } catch { setMsg.textContent = 'That is not valid settings JSON. Paste the full block copied from this dialog.'; }
+});
+
+/* ----------------------------------------------------------------- loop */
+function resize() {
+  const r = stage.getBoundingClientRect(); if (!r.width || !r.height) return;
+  renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); dirty = true;
+}
+new ResizeObserver(resize).observe(stage); resize();
+const hint = document.getElementById('hint');
+renderer.domElement.addEventListener('pointerdown', () => hint.classList.add('gone'), { once: true });
+
+const clock = new THREE.Clock(); let T = 0;
+function frame() {
+  requestAnimationFrame(frame);
+  processQueue();
+  const dt = Math.min(0.05, clock.getDelta());
+  const moving = P.speed > 0 && (P.noise > 0 || P.wave > 0 || (P.mode === 'voxels' && P.spin > 0));
+  if (moving) T += dt * P.speed;
+  if (current && G && (moving || dirty)) { current.update(T); dirty = false; }
+  controls.update();
+  renderer.render(scene, camera);
+}
+buildUI(); syncUI(); req('glyph'); frame();
+</script>
+</body>
+</html>
