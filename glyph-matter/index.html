@@ -157,6 +157,16 @@ dialog .dlg-body { display: flex; flex-direction: column; gap: 12px; }
 dialog textarea { font: 12px/1.45 var(--f-mono); min-height: 260px; letter-spacing: 0; }
 dialog h2 { margin: 0; font: 700 20px/1.1 var(--f-display); }
 
+.guide { position: absolute; border: 1.5px dashed var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.28); pointer-events: none; z-index: 1; }
+.stage canvas { object-fit: contain; }
+.dropping .stage::after { content: "Drop an image to map it onto the letters"; position: absolute; inset: 12px; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--overlay); font: 600 15px var(--f-ui); color: var(--ink); z-index: 4; }
+dialog video { display: block; width: 100%; border-radius: 8px; border: 1px solid var(--line); background: #000; }
+.upload { display: flex; gap: 8px; align-items: center; }
+.upload img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); }
+.upload label.btn { flex: 1; text-align: center; }
+.upload input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.exp-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.btn[disabled] { opacity: .5; cursor: progress; }
 @media (max-width: 860px) {
   html, body { height: auto; }
   .app { grid-template-columns: minmax(0, 1fr); height: auto; }
@@ -176,9 +186,11 @@ dialog h2 { margin: 0; font: 700 20px/1.1 var(--f-display); }
 <body>
 <div class="app">
   <div class="stage" id="stage">
+    <div class="guide" id="guide" hidden></div>
     <div class="hud tl"><span class="pill hint" id="hint">Drag to orbit · scroll to zoom · right-drag to pan</span></div>
     <div class="hud bl"><span class="pill" id="status">Starting…</span></div>
     <div class="hud br">
+      <button class="pill" id="btnPlay" type="button" aria-pressed="false">Pause</button>
       <button class="pill" id="btnView" type="button">Reset view</button>
       <button class="pill" id="btnSnap" type="button">Snapshot</button>
     </div>
@@ -201,12 +213,12 @@ dialog h2 { margin: 0; font: 700 20px/1.1 var(--f-display); }
   </aside>
 </div>
 
-<dialog id="snapDlg">
+<dialog id="outDlg">
   <div class="dlg-body">
-    <h2>Snapshot</h2>
-    <img id="snapImg" alt="Rendered snapshot of the current type design">
-    <p class="small">Right-click or long-press the image to save it.</p>
-    <div class="row"><a class="btn" id="snapDl" download="glyph-matter.png" hidden>Download PNG</a><button class="btn" type="button" data-close>Close</button></div>
+    <h2 id="outTitle">Snapshot</h2>
+    <div id="outMedia"></div>
+    <p class="small" id="outInfo"></p>
+    <div class="row"><button class="btn primary" id="outSave" type="button">Download</button><button class="btn" type="button" data-close>Close</button></div>
   </div>
 </dialog>
 
@@ -224,6 +236,12 @@ dialog h2 { margin: 0; font: 700 20px/1.1 var(--f-display); }
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 /* ------------------------------------------------------------------ fonts */
 const FONTS = [
@@ -330,7 +348,6 @@ const SCHEMA = [
     { k: 'material', type: 'select', def: 'chrome', lv: 'matpreset', label: 'Surface', modes: MESH,
       options: Object.entries(MATS).map(([k, v]) => [k, v.label]) },
     { k: 'colors', type: 'colors' },
-    { k: 'gradDir', type: 'select', def: 'x', lv: 'geo', label: 'Gradient', options: [['x', 'Horizontal'], ['y', 'Vertical'], ['depth', 'Depth'], ['radial', 'Radial'], ['noise', 'Noise'], ['none', 'Solid']] },
     { k: 'metalness', type: 'range', min: 0, max: 1, step: 0.01, def: 1, lv: 'mat', label: 'Metalness', modes: MESH, mat: 'physical' },
     { k: 'roughness', type: 'range', min: 0, max: 1, step: 0.01, def: 0.05, lv: 'mat', label: 'Roughness', modes: MESH, mat: 'physical' },
     { k: 'transmission', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'mat', label: 'Transmission', modes: MESH, mat: 'physical' },
@@ -339,6 +356,31 @@ const SCHEMA = [
     { k: 'sheen', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'mat', label: 'Sheen', modes: MESH, mat: 'physical' },
     { k: 'flat', type: 'toggle', def: false, lv: 'mat', label: 'Faceted shading', modes: MESH },
     { k: 'wireframe', type: 'toggle', def: false, lv: 'mat', label: 'Wireframe overlay', modes: MESH },
+  ]},
+  { sec: 'Texture', items: [
+    { k: 'source', type: 'select', def: 'gradient', lv: 'geo', label: 'Colour source', options: [['gradient', 'Gradient'], ['image', 'Your image'], ['marble', 'Marble'], ['holo', 'Holographic'], ['halftone', 'Halftone'], ['stripes', 'Stripes'], ['camo', 'Cells']] },
+    { k: 'image', type: 'image' },
+    { k: 'gradDir', type: 'select', def: 'x', lv: 'geo', label: 'Gradient', options: [['x', 'Horizontal'], ['y', 'Vertical'], ['depth', 'Depth'], ['radial', 'Radial'], ['noise', 'Noise'], ['none', 'Solid']] },
+    { k: 'texUse', type: 'select', def: 'color', lv: 'geo', label: 'Use texture as', options: [['color', 'Colour'], ['bump', 'Surface bump'], ['both', 'Colour + bump']] },
+    { k: 'imgScale', type: 'range', min: 0.2, max: 4, step: 0.01, def: 1, lv: 'geo', label: 'Texture scale' },
+    { k: 'bump', type: 'range', min: 0, max: 1, step: 0.01, def: 0.4, lv: 'mat', label: 'Bump depth', modes: MESH },
+  ]},
+  { sec: 'Motion', items: [
+    { k: 'kinetic', type: 'select', def: 'none', lv: 'live', label: 'Letter animation', options: [['none', 'None'], ['ripple', 'Ripple'], ['depth', 'Depth march'], ['swing', 'Swing'], ['spin', 'Spin'], ['flip', 'Flip'], ['pop', 'Pulse'], ['burst', 'Burst apart']] },
+    { k: 'kinAmp', type: 'range', min: 0, max: 2, step: 0.01, def: 0.7, lv: 'live', label: 'Amount' },
+    { k: 'stagger', type: 'range', min: 0, max: 1.6, step: 0.01, def: 0.35, lv: 'live', label: 'Letter delay' },
+    { k: 'beats', type: 'range', min: 1, max: 4, step: 1, def: 1, lv: 'live', label: 'Beats per loop' },
+    { k: 'loopLen', type: 'range', min: 2, max: 12, step: 0.5, def: 6, lv: 'live', label: 'Loop length', unit: ' s' },
+  ]},
+  { sec: 'Effects', items: [
+    { k: 'bloom', type: 'range', min: 0, max: 3, step: 0.01, def: 0, lv: 'scene', label: 'Bloom' },
+    { k: 'bloomRadius', type: 'range', min: 0, max: 1, step: 0.01, def: 0.45, lv: 'scene', label: 'Bloom radius' },
+    { k: 'bloomThresh', type: 'range', min: 0, max: 1.5, step: 0.01, def: 0.7, lv: 'scene', label: 'Bloom threshold' },
+    { k: 'dof', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'scene', label: 'Depth of field' },
+    { k: 'focus', type: 'range', min: -10, max: 10, step: 0.05, def: 0, lv: 'scene', label: 'Focus offset' },
+    { k: 'chroma', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'scene', label: 'Chromatic aberration' },
+    { k: 'grain', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'scene', label: 'Film grain' },
+    { k: 'vignette', type: 'range', min: 0, max: 1, step: 0.01, def: 0, lv: 'scene', label: 'Vignette' },
   ]},
   { sec: 'Space', items: [
     { k: 'bg', type: 'color', def: '#c9ced6', lv: 'scene', label: 'Background' },
@@ -350,6 +392,13 @@ const SCHEMA = [
     { k: 'light', type: 'range', min: 0, max: 360, step: 1, def: 40, lv: 'scene', label: 'Key light angle', unit: '°' },
     { k: 'fov', type: 'range', min: 10, max: 100, step: 1, def: 35, lv: 'scene', label: 'Lens (dolly zoom)', unit: '°' },
     { k: 'autoRotate', type: 'range', min: -3, max: 3, step: 0.01, def: 0, lv: 'scene', label: 'Orbit speed' },
+  ]},
+  { sec: 'Export', items: [
+    { k: 'frame', type: 'select', def: 'screen', lv: 'none', label: 'Frame', options: [['screen', 'Fit screen'], ['16:9', '16:9 landscape'], ['1:1', '1:1 square'], ['4:5', '4:5 portrait'], ['9:16', '9:16 story']] },
+    { k: 'gifWidth', type: 'select', def: '480', lv: 'none', label: 'GIF width', options: [['320', '320 px'], ['480', '480 px'], ['640', '640 px'], ['800', '800 px']] },
+    { k: 'gifFps', type: 'select', def: '15', lv: 'none', label: 'GIF frame rate', options: [['10', '10 fps'], ['15', '15 fps'], ['20', '20 fps'], ['25', '25 fps']] },
+    { k: 'vidLoops', type: 'select', def: '1', lv: 'none', label: 'Video length', options: [['1', '1 loop'], ['2', '2 loops'], ['4', '4 loops']] },
+    { k: 'exportBtns', type: 'exportBtns' },
   ]},
 ];
 const DEF = { colorA: '#ffffff', colorB: '#d9e0ff' };
@@ -367,8 +416,14 @@ const PRESETS = {
   'Voxel bloom': { mode: 'voxels', shape: 'sphere', material: 'iridescent', res: 110, size: 0.85, depth: 0.5, noise: 0.6, bg: '#101114', backdrop: 'none', exposure: 1.1 },
   'Tumbling blocks': { mode: 'voxels', shape: 'box', material: 'plastic', res: 72, size: 0.92, depth: 0.22, roundness: 0.2, spin: 1.2, scatter: 0.6, noise: 0.3, speed: 0.5, bg: '#f1f2f4', backdrop: 'grid', bdColor: '#c4c9d2', gradDir: 'y' },
   'Gold ring': { mode: 'voxels', shape: 'cylinder', material: 'gold', res: 120, size: 0.8, depth: 0.5, bend: 1, noise: 0.05, autoRotate: 0.8, bg: '#141210', backdrop: 'none', cam: [0.4, 0.35, 1] },
-  'Signal terrain': { mode: 'contours', lineStep: 2, depth: 1.8, roundness: 0.5, wave: 0.25, noise: 0.35, bg: '#0d0f13', backdrop: 'none', colorA: '#69e2ff', colorB: '#ff4fa3', opacity: 0.9, glow: true, cam: [0, -0.9, 0.55] },
-  'Echo stack': { mode: 'slices', layers: 28, spacing: 0.16, layerRot: 2, opacity: 0.16, glow: true, noise: 0.15, bg: '#111216', backdrop: 'none', colorA: '#ff5f3a', colorB: '#5a6bff', cam: [0.7, 0.25, 0.75] },
+  'Ripple balloon': { material: 'plastic', kinetic: 'ripple', kinAmp: 0.8, stagger: 0.45, noise: 0.1, roundness: 0.85, bg: '#f2ece9', backdrop: 'dots', bdColor: '#ff5a36', bdDist: 8, colorA: '#ff5a36', colorB: '#ff9fbd' },
+  'Flip board': { mode: 'voxels', shape: 'box', material: 'chrome', res: 96, size: 0.95, depth: 0.3, roundness: 0.15, kinetic: 'flip', stagger: 0.3, noise: 0, bg: '#20232b', backdrop: 'stripes', bdColor: '#2c3140', bdDist: 6, cam: [0.35, 0.15, 1] },
+  'Halftone chrome': { material: 'chrome', source: 'halftone', texUse: 'bump', bump: 0.6, imgScale: 0.6, roundness: 0.5, noise: 0.15, bg: '#bfc5ce', backdrop: 'gradient', bdColor: '#3b4252' },
+  'Marble relief': { mode: 'relief', material: 'clay', source: 'marble', texUse: 'both', bump: 0.15, imgScale: 2.2, roughness: 0.45, clearcoat: 0.6, colorA: '#efe9e2', colorB: '#3d4250', depth: 0.6, roundness: 0.35, smooth: 2, noise: 0, bg: '#d5d7db', backdrop: 'none', light: 300, cam: [-0.25, -0.3, 1] },
+  'Dreamy glass': { material: 'glass', roundness: 0.75, depth: 1.4, dof: 0.55, focus: -1.2, bloom: 0.6, bloomThresh: 0.85, grain: 0.25, noise: 0.2, bg: '#dfe4ea', backdrop: 'dots', bdColor: '#ff6a3d', bdDist: 7, cam: [0.45, 0.1, 1] },
+  'Signal terrain': { mode: 'contours', bloom: 1.1, bloomThresh: 0.05, bloomRadius: 0.6, vignette: 0.5, lineStep: 2, depth: 1.8, roundness: 0.5, wave: 0.25, noise: 0.35, bg: '#0d0f13', backdrop: 'none', colorA: '#69e2ff', colorB: '#ff4fa3', opacity: 0.9, glow: true, cam: [0, -0.9, 0.55] },
+  'Echo stack': { mode: 'slices', layers: 28, spacing: 0.16, layerRot: 0.8, opacity: 0.16, glow: true, noise: 0.15, bg: '#111216', backdrop: 'none', colorA: '#ff5f3a', colorB: '#5a6bff', cam: [0.45, 0.15, 0.9] },
+  'Burst apart': { mode: 'particles', perCell: 4, pointSize: 0.08, opacity: 1, kinetic: 'burst', kinAmp: 1, stagger: 0.25, noise: 0.3, glow: true, bloom: 0.9, bloomThresh: 0.1, chroma: 0.4, bg: '#0a0b0f', backdrop: 'none', colorA: '#ffd36b', colorB: '#ff3d7f', gradDir: 'x' },
   'Particle drift': { mode: 'particles', perCell: 5, pointSize: 0.11, opacity: 1, noise: 0.8, noiseScale: 0.5, speed: 0.3, glow: true, bg: '#0b0c10', backdrop: 'none', colorA: '#ffffff', colorB: '#7d8cff', gradDir: 'depth' },
 };
 function presetValues(name) {
@@ -418,6 +473,38 @@ scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const key = new THREE.DirectionalLight(0xffffff, 2.2); scene.add(key);
 const fill = new THREE.HemisphereLight(0xffffff, 0x404050, 0.5); scene.add(fill);
 
+/* Post-processing: depth of field, bloom, then tone mapping, then a finishing pass for grain, fringing and vignette. */
+const composer = new EffectComposer(renderer);
+const bokeh = new BokehPass(scene, camera, { focus: 20, aperture: 0, maxblur: 0.012 });
+const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0, 0.45, 0.7);
+const finish = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uSeed: { value: 0 }, uGrain: { value: 0 }, uChroma: { value: 0 }, uVignette: { value: 0 } },
+  vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uSeed, uGrain, uChroma, uVignette; varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){
+      vec2 d = vUv - 0.5; float r = length(d); vec2 off = d * uChroma * 0.025;
+      vec4 c = texture2D(tDiffuse, vUv);
+      c.r = texture2D(tDiffuse, vUv + off).r; c.b = texture2D(tDiffuse, vUv - off).b;
+      c.rgb *= 1.0 - uVignette * smoothstep(0.2, 0.85, r);
+      c.rgb += (hash(vUv * vec2(1733.0, 947.0) + uSeed) - 0.5) * uGrain * 0.28;
+      gl_FragColor = c;
+    }`,
+});
+composer.addPass(new RenderPass(scene, camera)); composer.addPass(bokeh); composer.addPass(bloom); composer.addPass(new OutputPass()); composer.addPass(finish);
+function applyFx() {
+  bloom.enabled = P.bloom > 0; bloom.strength = P.bloom; bloom.radius = P.bloomRadius; bloom.threshold = P.bloomThresh;
+  bokeh.enabled = P.dof > 0;
+  bokeh.uniforms.aperture.value = P.dof * P.dof * 0.012; bokeh.uniforms.maxblur.value = 0.004 + P.dof * 0.016;
+  finish.enabled = P.grain > 0 || P.chroma > 0 || P.vignette > 0;
+  Object.assign(finish.uniforms.uGrain, { value: P.grain }); finish.uniforms.uChroma.value = P.chroma; finish.uniforms.uVignette.value = P.vignette;
+}
+function render() {
+  bokeh.uniforms.focus.value = Math.max(0.1, camera.position.distanceTo(controls.target) + P.focus);
+  finish.uniforms.uSeed.value = (finish.uniforms.uSeed.value + 0.137) % 10;
+  composer.render();
+}
+
 let backdrop = null, backdropKey = '';
 function makeBackdropTex(kind, c1, c2) {
   const c = document.createElement('canvas'); c.width = c.height = 512; const x = c.getContext('2d');
@@ -433,6 +520,7 @@ function makeBackdropTex(kind, c1, c2) {
 }
 
 /* ---------------------------------------------------------------- glyphs */
+let LETTERS = [];
 const gCan = document.createElement('canvas');
 const gCtx = gCan.getContext('2d', { willReadFrequently: true });
 function renderGlyphs() {
@@ -441,10 +529,10 @@ function renderGlyphs() {
   gCtx.font = font;
   const track = P.tracking * fs;
   const info = lines.map(line => {
-    const chars = [...line]; const xs = []; let acc = '';
-    for (let i = 0; i < chars.length; i++) { xs.push(gCtx.measureText(acc).width + track * i); acc += chars[i]; }
+    const chars = [...line]; const xs = [], xe = []; let acc = '';
+    for (let i = 0; i < chars.length; i++) { xs.push(gCtx.measureText(acc).width + track * i); acc += chars[i]; xe.push(gCtx.measureText(acc).width + track * i); }
     const w = chars.length ? gCtx.measureText(acc).width + track * (chars.length - 1) : 0;
-    return { chars, xs, w };
+    return { chars, xs, xe, w };
   });
   const maxW = Math.max(fs * 0.6, ...info.map(l => l.w));
   const pad = fs * 0.42, lineH = fs * P.leading;
@@ -454,8 +542,10 @@ function renderGlyphs() {
   gCtx.setTransform(s, 0, 0, s, 0, 0);
   gCtx.clearRect(0, 0, W, H);
   gCtx.font = font; gCtx.fillStyle = '#fff'; gCtx.textBaseline = 'middle';
+  LETTERS = [];
   info.forEach((L, li) => {
     const x0 = (W - L.w) / 2, y = pad + fs * 0.6 + li * lineH;
+    L.chars.forEach((ch, i) => { if (ch.trim()) LETTERS.push({ line: li, x0: (x0 + L.xs[i]) * s, x1: (x0 + L.xe[i]) * s, cy: y * s, hh: lineH * s / 2 }); });
     if (track === 0) gCtx.fillText(L.chars.join(''), x0, y);
     else L.chars.forEach((ch, i) => gCtx.fillText(ch, x0 + L.xs[i], y));
   });
@@ -536,20 +626,64 @@ function buildField() {
     ex[k] = G.x0 + gx * cellW; ey[k] = G.y0 - gy * cellW;
   }
   G.ex = ex; G.ey = ey;
+  // Assign every cell to its nearest letter so letters can animate independently.
+  const NL = LETTERS.length, lid = new Int16Array(n).fill(-1), lw = new Float32Array(n);
+  const LCX = new Float32Array(NL), LCY = new Float32Array(NL), LR = new Float32Array(NL * 3);
+  const wx = X => X * kW - cw * kW / 2, wy = Y => rows * cellW / 2 - Y * kW;
+  LETTERS.forEach((L, i) => {
+    LCX[i] = wx((L.x0 + L.x1) / 2); LCY[i] = wy(L.cy);
+    const th = ((i * 2.3999) % 6.283), ph = Math.acos(((i * 0.618) % 1) * 2 - 1);
+    LR[i * 3] = Math.sin(ph) * Math.cos(th); LR[i * 3 + 1] = Math.sin(ph) * Math.sin(th); LR[i * 3 + 2] = Math.abs(Math.cos(ph)) + 0.3;
+  });
+  if (NL) for (let j = 0; j < rows; j++) {
+    const cy = (j + 0.5) * cell;
+    for (let i = 0; i < cols; i++) {
+      const cx = (i + 0.5) * cell; let best = -1, bd = 1e18;
+      for (let l = 0; l < NL; l++) {
+        const L = LETTERS[l];
+        const dx = cx < L.x0 ? L.x0 - cx : cx > L.x1 ? cx - L.x1 : 0, dy = Math.max(0, Math.abs(cy - L.cy) - L.hh * 0.8);
+        const d = dx * dx + dy * dy * 4; if (d < bd) { bd = d; best = l; }
+      }
+      const k = j * cols + i; lid[k] = best; lw[k] = Math.min(1, prof[k] * 4);
+    }
+  }
+  Object.assign(G, { lid, lw, LCX, LCY, LR, NL });
 }
 
 /* --------------------------------------------------------------- deform */
-let DX = 0, DY = 0, DZ = 0, AT = 0, AB = 0;
-function deform(x, y, z, sx, sy, sz, t) {
-  AT = 0; AB = 0;
+// Time is a loop phase (0..1). Noise travels round a circle in noise space so every animation loops seamlessly.
+let PH = 0, NA = 0, NB = 0, WPH = 0, KPH = 0;
+function setPhase(ph) {
+  PH = ph; const a = ph * Math.PI * 2, R = P.speed * P.loopLen / (Math.PI * 2);
+  NA = R * Math.cos(a); NB = R * Math.sin(a);
+  WPH = a * (P.speed > 0 ? Math.max(1, Math.round(P.speed * P.loopLen / Math.PI)) : 0);
+  KPH = a * P.beats;
+}
+let DX = 0, DY = 0, DZ = 0, AT = 0, AB = 0, AKX = 0, AKY = 0, AKZ = 0, KS = 1;
+function deform(x, y, z, sx, sy, sz, lid, lw) {
+  AT = 0; AB = 0; AKX = 0; AKY = 0; AKZ = 0; KS = 1;
+  if (P.kinetic !== 'none' && lid >= 0 && lw > 0) {
+    const cx = G.LCX[lid], cy = G.LCY[lid]; let lx = x - cx, ly = y - cy, lz = z;
+    const a = KPH - lid * P.stagger, s = Math.sin(a), A = P.kinAmp * lw;
+    switch (P.kinetic) {
+      case 'ripple': ly += A * 0.9 * s; break;
+      case 'depth': lz += A * 2.5 * s; break;
+      case 'swing': { const r = A * 0.9 * s, c = Math.cos(r), n = Math.sin(r); const nx = lx * c - ly * n; ly = lx * n + ly * c; lx = nx; AKZ = r; break; }
+      case 'spin': { const r = A * Math.PI * s, c = Math.cos(r), n = Math.sin(r); const nx = lx * c + lz * n; lz = -lx * n + lz * c; lx = nx; AKY = r; break; }
+      case 'flip': { const r = (a - Math.sin(a) * Math.min(1, P.kinAmp) * 0.9) * lw, c = Math.cos(r), n = Math.sin(r); const ny = ly * c - lz * n; lz = ly * n + lz * c; ly = ny; AKX = r; break; }
+      case 'pop': { const k = Math.max(0.02, 1 + A * 0.6 * s); lx *= k; ly *= k; lz *= k; KS = k; break; }
+      case 'burst': { const e = A * 3 * (0.5 - 0.5 * Math.cos(a)), o = lid * 3; lx += G.LR[o] * e; ly += G.LR[o + 1] * e; lz += G.LR[o + 2] * e; AKX = G.LR[o + 1] * e * 0.6; AKY = G.LR[o] * e * 0.6; break; }
+    }
+    x = cx + lx; y = cy + ly; z = lz;
+  }
   if (P.scatter) { x += sx * P.scatter; y += sy * P.scatter; z += sz * P.scatter; }
   if (P.skew) x += y * P.skew;
   if (P.noise) {
     const s = P.noiseScale, a = P.noise;
-    const nx = noise3(x * s + t, y * s, z * s + 17.1), ny = noise3(x * s, y * s - t, z * s + 31.7), nz = noise3(x * s + 5.2, y * s + t * 0.7, z * s + 47.3);
+    const nx = noise3(x * s + NA, y * s + NB, z * s + 17.1), ny = noise3(x * s - NB, y * s + NA, z * s + 31.7), nz = noise3(x * s + 5.2 + NB, y * s - NA, z * s + 47.3);
     x += a * 0.5 * nx; y += a * 0.5 * ny; z += a * nz;
   }
-  if (P.wave) z += P.wave * Math.sin(x * P.waveFreq + t * 2) * Math.cos(y * P.waveFreq * 0.6 - t);
+  if (P.wave) z += P.wave * Math.sin(x * P.waveFreq + WPH) * Math.cos(y * P.waveFreq * 0.6 - WPH);
   if (P.twist) {
     const a = P.twist * x / (G.WW / 2), c = Math.cos(a), s = Math.sin(a);
     const ny = y * c - z * s; z = y * s + z * c; y = ny; AT = a;
@@ -575,12 +709,79 @@ function gradT(x, y, z, zMax) {
   }
   return Math.min(1, Math.max(0, t));
 }
-function colorAt(x, y, z, zMax) { return cT.lerpColors(cA, cB, gradT(x, y, z, zMax)); }
+
+/* Texture source: an uploaded image or a procedural pattern, mapped flat across the text block. */
+let userImg = null, userImgVer = 0, srcKey = '', srcCan = null, srcData = null, srcTex = null;
+let KU = 1, KV = 1, CU = 0, CV = 0;
+const texOn = () => P.source !== 'gradient' && !(P.source === 'image' && !userImg);
+const texColour = () => texOn() && P.texUse !== 'bump';
+const texBump = () => texOn() && P.texUse !== 'color';
+function drawPattern(kind, c) {
+  const S = 512, x = c.getContext('2d'); c.width = c.height = S;
+  const A = new THREE.Color(P.colorA), B = new THREE.Color(P.colorB);
+  if (kind === 'marble' || kind === 'holo' || kind === 'camo') {
+    const im = x.createImageData(S, S), d = im.data, t = new THREE.Color();
+    for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+      // Tileable fbm: sample noise on a torus so the pattern repeats without seams.
+      const u = i / S * 6.2832, v = j / S * 6.2832;
+      let f = 0, amp = 0.5, fr = 1;
+      for (let o = 0; o < 4; o++) { f += amp * noise3(Math.cos(u) * fr * 1.6 + 9, Math.sin(u) * fr * 1.6 + Math.cos(v) * fr * 1.6, Math.sin(v) * fr * 1.6 + o * 7); amp *= 0.5; fr *= 2; }
+      let k;
+      if (kind === 'marble') { k = 0.5 + 0.5 * Math.sin((i / S) * 6.2832 * 2 + f * 9); k = Math.pow(k, 0.6); t.lerpColors(A, B, k); }
+      else if (kind === 'holo') { t.setHSL((f * 1.6 + i / S + j / S * 0.5) % 1 + 1, 0.85, 0.62 + 0.18 * Math.sin(f * 20)); }
+      else { k = f > 0.12 ? 1 : f > -0.08 ? 0.5 : 0; t.lerpColors(A, B, k); }
+      const o = (j * S + i) * 4; d[o] = t.r * 255; d[o + 1] = t.g * 255; d[o + 2] = t.b * 255; d[o + 3] = 255;
+    }
+    x.putImageData(im, 0, 0);
+  } else if (kind === 'halftone') {
+    x.fillStyle = P.colorA; x.fillRect(0, 0, S, S); x.fillStyle = P.colorB;
+    const n = 16, cs = S / n;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const r = cs * 0.5 * (0.25 + 0.75 * (0.5 + 0.5 * Math.sin((i + j) / n * 6.2832)));
+      x.beginPath(); x.arc((i + 0.5) * cs, (j + 0.5) * cs, r, 0, 7); x.fill();
+    }
+  } else if (kind === 'stripes') {
+    x.fillStyle = P.colorA; x.fillRect(0, 0, S, S); x.fillStyle = P.colorB;
+    for (let i = -S; i < S * 2; i += 64) { x.beginPath(); x.moveTo(i, 0); x.lineTo(i + 32, 0); x.lineTo(i + 32 - S, S); x.lineTo(i - S, S); x.fill(); }
+  }
+}
+function updateSource() {
+  if (!texOn()) { srcData = null; return; }
+  const key = `${P.source}|${P.colorA}|${P.colorB}|${userImgVer}`;
+  if (key !== srcKey) {
+    srcCan = document.createElement('canvas');
+    if (P.source === 'image') {
+      const sc = Math.min(1, 1024 / Math.max(userImg.width, userImg.height));
+      srcCan.width = Math.max(1, Math.round(userImg.width * sc)); srcCan.height = Math.max(1, Math.round(userImg.height * sc));
+      srcCan.getContext('2d').drawImage(userImg, 0, 0, srcCan.width, srcCan.height);
+    } else drawPattern(P.source, srcCan);
+    srcData = srcCan.getContext('2d').getImageData(0, 0, srcCan.width, srcCan.height);
+    if (srcTex) srcTex.dispose();
+    srcTex = new THREE.CanvasTexture(srcCan); srcTex.colorSpace = THREE.SRGBColorSpace;
+    srcTex.wrapS = srcTex.wrapT = THREE.RepeatWrapping; srcTex.anisotropy = 8;
+    srcKey = key;
+  }
+  if (P.source === 'image') {
+    // Cover the text block with the image, keeping its aspect ratio.
+    const ia = srcCan.width / srcCan.height, ta = G.CW / G.CH;
+    const sx = ia > ta ? ta / ia : 1, sy = ia > ta ? 1 : ia / ta;
+    KU = sx / (P.imgScale * G.CW); KV = sy / (P.imgScale * G.CH); CU = 0.5; CV = 0.5;
+  } else { KU = KV = 1 / (4 * P.imgScale); CU = CV = 0; }
+}
+function sampleSrc(x, y) {
+  const w = srcData.width, h = srcData.height;
+  let u = (x * KU + CU) % 1, v = (y * KV + CV) % 1; if (u < 0) u += 1; if (v < 0) v += 1;
+  const o = ((Math.min(h - 1, ((1 - v) * h) | 0)) * w + Math.min(w - 1, (u * w) | 0)) * 4, d = srcData.data;
+  return cT.setRGB(d[o] / 255, d[o + 1] / 255, d[o + 2] / 255, THREE.SRGBColorSpace);
+}
+function colorAt(x, y, z, zMax) { return texColour() ? sampleSrc(x, y) : cT.lerpColors(cA, cB, gradT(x, y, z, zMax)); }
 
 /* ------------------------------------------------------------- material */
-function makeMeshMaterial(vertexColors) {
+function makeMeshMaterial(vertexColors, uvMapped) {
   const m = MATS[P.material] || MATS.chrome;
   const common = { side: THREE.DoubleSide, flatShading: !!P.flat, wireframe: !!P.wireframe };
+  if (uvMapped && srcTex && texColour()) { common.map = srcTex; vertexColors = false; }
+  if (uvMapped && srcTex && texBump() && m.type !== 'wire') { common.bumpMap = srcTex; common.bumpScale = P.bump * 6; }
   if (m.type === 'normal') return new THREE.MeshNormalMaterial(common);
   if (m.type === 'toon') return new THREE.MeshToonMaterial({ ...common, vertexColors });
   if (m.type === 'wire') return new THREE.MeshBasicMaterial({ ...common, wireframe: true, vertexColors });
@@ -599,20 +800,22 @@ function disposeObj(o) {
   o.traverse(c => {
     if (c.geometry) c.geometry.dispose();
     const ms = Array.isArray(c.material) ? c.material : c.material ? [c.material] : [];
-    for (const m of ms) { if (m.map) m.map.dispose(); m.dispose(); }
+    for (const m of ms) { if (m.map && m.map !== srcTex && m.map !== dotTex) m.map.dispose(); m.dispose(); }
   });
 }
 
 function buildSurface(balloon) {
   const { cols, rows, prof, inside } = G, n = cols * rows, nv = balloon ? n * 2 : n;
   const depth = balloon ? Math.max(0.02, Math.abs(P.depth)) : P.depth;
-  const base = new Float32Array(nv * 3), pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3);
+  const base = new Float32Array(nv * 3), pos = new Float32Array(nv * 3), col = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
+  const vl = new Int16Array(nv), vw = new Float32Array(nv);
   for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
     const k = j * cols + i, x = G.ex[k], y = G.ey[k];
     const h = (balloon && !inside[k]) ? 0 : prof[k] * depth;
-    base.set([x, y, h], k * 3);
+    base.set([x, y, h], k * 3); uv[k * 2] = x * KU + CU; uv[k * 2 + 1] = y * KV + CV;
+    vl[k] = G.lid[k]; vw[k] = balloon ? 1 : G.lw[k];
     colorAt(x, y, h, Math.abs(depth)).toArray(col, k * 3);
-    if (balloon) { base.set([x, y, -h], (k + n) * 3); col.set(col.subarray(k * 3, k * 3 + 3), (k + n) * 3); }
+    if (balloon) { base.set([x, y, -h], (k + n) * 3); col.set(col.subarray(k * 3, k * 3 + 3), (k + n) * 3); uv.set(uv.subarray(k * 2, k * 2 + 2), (k + n) * 2); vl[k + n] = vl[k]; vw[k + n] = 1; }
   }
   const idx = [];
   for (let j = 0; j < rows - 1; j++) for (let i = 0; i < cols - 1; i++) {
@@ -624,13 +827,14 @@ function buildSurface(balloon) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3).setUsage(THREE.DynamicDrawUsage));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   geo.setIndex(new THREE.BufferAttribute(nv > 65535 ? new Uint32Array(idx) : new Uint16Array(idx), 1));
-  const mesh = new THREE.Mesh(geo, makeMeshMaterial(true)); mesh.frustumCulled = false;
+  const mesh = new THREE.Mesh(geo, makeMeshMaterial(true, true)); mesh.frustumCulled = false;
   return {
     obj: mesh, label: `${(idx.length / 3).toLocaleString()} triangles`,
-    setMaterial() { mesh.material.dispose(); mesh.material = makeMeshMaterial(true); },
-    update(t) {
-      for (let v = 0; v < nv; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], 0, 0, 0, t); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
+    setMaterial() { mesh.material.dispose(); mesh.material = makeMeshMaterial(true, true); },
+    update() {
+      for (let v = 0; v < nv; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], 0, 0, 0, vl[v], vw[v]); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
       geo.attributes.position.needsUpdate = true; geo.computeVertexNormals();
     },
   };
@@ -654,12 +858,12 @@ function buildVoxels() {
   const step = Math.max(1, Math.ceil(cells.length / cap)), list = cells.filter((_, i) => i % step === 0);
   const N = list.length, stretch = P.shape === 'box' || P.shape === 'cylinder';
   const depth = Math.abs(P.depth);
-  const bx = new Float32Array(N), by = new Float32Array(N), bh = new Float32Array(N), sc = new Float32Array(N * 3);
+  const bx = new Float32Array(N), by = new Float32Array(N), bh = new Float32Array(N), sc = new Float32Array(N * 3), vl = new Int16Array(N);
   const mesh = new THREE.InstancedMesh(voxelGeometry(P.shape), makeMeshMaterial(false), Math.max(1, N));
   mesh.count = N; mesh.frustumCulled = false; mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   list.forEach((k, n) => {
     const i = k % cols, j = (k / cols) | 0;
-    bx[n] = G.x0 + i * G.cellW; by[n] = G.y0 - j * G.cellW; bh[n] = prof[k] * depth;
+    bx[n] = G.x0 + i * G.cellW; by[n] = G.y0 - j * G.cellW; bh[n] = prof[k] * depth; vl[n] = G.lid[k];
     const th = Math.random() * Math.PI * 2, ph = Math.acos(Math.random() * 2 - 1), r = Math.random();
     sc[n * 3] = Math.sin(ph) * Math.cos(th) * r; sc[n * 3 + 1] = Math.sin(ph) * Math.sin(th) * r; sc[n * 3 + 2] = Math.cos(ph) * r;
     mesh.setColorAt(n, colorAt(bx[n], by[n], bh[n], depth));
@@ -668,21 +872,21 @@ function buildVoxels() {
   return {
     obj: mesh, label: `${N.toLocaleString()} ${P.shape === 'box' ? 'cubes' : 'elements'}${step > 1 ? ' (thinned)' : ''}`,
     setMaterial() { mesh.material.dispose(); mesh.material = makeMeshMaterial(false); },
-    update(t) {
+    update() {
       const cs = G.cellW * P.size;
       for (let n = 0; n < N; n++) {
         const z = stretch ? 0 : bh[n];
-        deform(bx[n], by[n], z, sc[n * 3], sc[n * 3 + 1], sc[n * 3 + 2], t);
+        deform(bx[n], by[n], z, sc[n * 3], sc[n * 3 + 1], sc[n * 3 + 2], vl[n], 1);
         _p.set(DX, DY, DZ);
-        let rx = AT, ry = AB, rz = 0;
+        let rx = AT + AKX, ry = AB + AKY, rz = AKZ; const ks = KS * cs;
         if (P.spin) {
           const s = 0.35;
-          rx += P.spin * noise3(bx[n] * s + t * 0.6, by[n] * s, 1.3) * 2;
-          ry += P.spin * noise3(bx[n] * s, by[n] * s + t * 0.6, 7.9) * 2;
-          rz += P.spin * noise3(bx[n] * s - t * 0.4, by[n] * s, 13.1) * 2;
+          rx += P.spin * noise3(bx[n] * s + NA * 0.6, by[n] * s + NB * 0.6, 1.3) * 2;
+          ry += P.spin * noise3(bx[n] * s - NB * 0.6, by[n] * s + NA * 0.6, 7.9) * 2;
+          rz += P.spin * noise3(bx[n] * s + NB * 0.4, by[n] * s - NA * 0.4, 13.1) * 2;
         }
         _q.setFromEuler(_e.set(rx, ry, rz));
-        if (stretch) _s.set(cs, cs, Math.max(cs * 0.25, bh[n] * 2)); else _s.set(cs, cs, cs);
+        if (stretch) _s.set(ks, ks, Math.max(ks * 0.25, bh[n] * 2 * KS)); else _s.set(ks, ks, ks);
         mesh.setMatrixAt(n, _m.compose(_p, _q, _s));
       }
       mesh.instanceMatrix.needsUpdate = true;
@@ -703,7 +907,7 @@ function buildParticles() {
   const { cols, rows, prof, inside } = G, per = P.perCell | 0, depth = Math.abs(P.depth);
   let N = 0; for (let k = 0; k < cols * rows; k++) if (inside[k]) N += per;
   N = Math.min(N, 160000);
-  const base = new Float32Array(N * 3), sc = new Float32Array(N * 3), pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
+  const base = new Float32Array(N * 3), sc = new Float32Array(N * 3), pos = new Float32Array(N * 3), col = new Float32Array(N * 3), vl = new Int16Array(N);
   let n = 0;
   outer: for (let k = 0; k < cols * rows; k++) {
     if (!inside[k]) continue;
@@ -714,7 +918,7 @@ function buildParticles() {
       base.set([x, y, z], n * 3);
       const th = Math.random() * 6.283, ph = Math.acos(Math.random() * 2 - 1), rr = Math.random();
       sc.set([Math.sin(ph) * Math.cos(th) * rr, Math.sin(ph) * Math.sin(th) * rr, Math.cos(ph) * rr], n * 3);
-      colorAt(x, y, z, depth).toArray(col, n * 3); n++;
+      colorAt(x, y, z, depth).toArray(col, n * 3); vl[n] = G.lid[k]; n++;
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -725,8 +929,8 @@ function buildParticles() {
   const pts = new THREE.Points(geo, mat); pts.frustumCulled = false;
   return {
     obj: pts, label: `${n.toLocaleString()} particles`, setMaterial() {},
-    update(t) {
-      for (let v = 0; v < n; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], sc[o], sc[o + 1], sc[o + 2], t); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
+    update() {
+      for (let v = 0; v < n; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], sc[o], sc[o + 1], sc[o + 2], vl[v], 1); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
       geo.attributes.position.needsUpdate = true;
     },
   };
@@ -750,8 +954,8 @@ function buildContours() {
   const lines = new THREE.LineSegments(geo, mat); lines.frustumCulled = false;
   return {
     obj: lines, label: `${(idx.length / 2).toLocaleString()} line segments`, setMaterial() {},
-    update(t) {
-      for (let v = 0; v < n; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], 0, 0, 0, t); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
+    update() {
+      for (let v = 0; v < n; v++) { const o = v * 3; deform(base[o], base[o + 1], base[o + 2], 0, 0, 0, G.lid[v], G.lw[v]); pos[o] = DX; pos[o + 1] = DY; pos[o + 2] = DZ; }
       geo.attributes.position.needsUpdate = true;
     },
   };
@@ -762,38 +966,47 @@ function buildSlices() {
   const tex = new THREE.CanvasTexture(gCan); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   const segX = Math.min(90, Math.max(8, Math.round(G.cols / 2))), segY = Math.max(2, Math.round(segX * G.CH / G.CW));
   const layers = [];
+  let stex = null;
+  if (texColour()) {
+    stex = srcTex.clone(); stex.needsUpdate = true;
+    stex.repeat.set(G.CW * KU, G.CH * KV); stex.offset.set(CU - 0.5 * G.CW * KU, CV - 0.5 * G.CH * KV);
+  }
   for (let i = 0; i < N; i++) {
     const tl = N > 1 ? i / (N - 1) : 0, c = i - (N - 1) / 2;
     const geo = new THREE.PlaneGeometry(G.CW, G.CH, segX, segY);
     const pa = geo.attributes.position; pa.setUsage(THREE.DynamicDrawUsage);
-    const base = new Float32Array(pa.array.length);
+    const base = new Float32Array(pa.array.length), vl = new Int16Array(pa.count), vw = new Float32Array(pa.count);
     const rot = c * P.layerRot * Math.PI / 180, cs = Math.cos(rot), sn = Math.sin(rot), sc = Math.max(0.05, 1 + c * P.layerScale), z = c * P.spacing;
     for (let v = 0; v < pa.count; v++) {
       const x = pa.array[v * 3] * sc, y = pa.array[v * 3 + 1] * sc;
       base[v * 3] = x * cs - y * sn; base[v * 3 + 1] = x * sn + y * cs; base[v * 3 + 2] = z;
+      const ci = Math.min(G.cols - 1, Math.max(0, Math.round((pa.array[v * 3] - G.x0) / G.cellW))), cj = Math.min(G.rows - 1, Math.max(0, Math.round((G.y0 - pa.array[v * 3 + 1]) / G.cellW)));
+      vl[v] = G.lid[cj * G.cols + ci]; vw[v] = G.lw[cj * G.cols + ci];
     }
-    const mat = new THREE.MeshBasicMaterial({ map: tex, color: cT.lerpColors(cA, cB, P.gradDir === 'none' ? 0 : tl).clone(), transparent: true,
+    const useTex = texColour();
+    const mat = new THREE.MeshBasicMaterial({ map: useTex ? stex : tex, alphaMap: useTex ? tex : null,
+      color: useTex ? new THREE.Color(1, 1, 1) : cT.lerpColors(cA, cB, P.gradDir === 'none' ? 0 : tl).clone(), transparent: true,
       opacity: P.opacity, side: THREE.DoubleSide, depthWrite: false, blending: P.glow ? THREE.AdditiveBlending : THREE.NormalBlending });
     const mesh = new THREE.Mesh(geo, mat); mesh.frustumCulled = false; mesh.renderOrder = i;
-    group.add(mesh); layers.push({ geo, base });
+    group.add(mesh); layers.push({ geo, base, vl, vw });
   }
   return {
     obj: group, label: `${N} layers`, setMaterial() {},
-    update(t) {
+    update() {
       for (const L of layers) {
         const a = L.geo.attributes.position, arr = a.array, b = L.base;
-        for (let v = 0; v < a.count; v++) { const o = v * 3; deform(b[o], b[o + 1], b[o + 2], 0, 0, 0, t); arr[o] = DX; arr[o + 1] = DY; arr[o + 2] = DZ; }
+        for (let v = 0; v < a.count; v++) { const o = v * 3; deform(b[o], b[o + 1], b[o + 2], 0, 0, 0, L.vl[v], L.vw[v]); arr[o] = DX; arr[o + 1] = DY; arr[o + 2] = DZ; }
         a.needsUpdate = true;
       }
     },
-    dispose() { tex.dispose(); },
+    dispose() { tex.dispose(); stex?.dispose(); },
   };
 }
 
 let current = null;
 function buildGeometry() {
   if (current) { scene.remove(current.obj); disposeObj(current.obj); current.dispose?.(); }
-  cA.set(P.colorA); cB.set(P.colorB);
+  cA.set(P.colorA); cB.set(P.colorB); updateSource();
   const b = { inflate: () => buildSurface(true), relief: () => buildSurface(false), voxels: buildVoxels, particles: buildParticles, contours: buildContours, slices: buildSlices }[P.mode] || (() => buildSurface(true));
   current = b(); scene.add(current.obj);
   setStatus(G.count ? `${current.label} · ${G.cols}×${G.rows} grid` : 'No filled glyph area — type something or lower the tracking');
@@ -811,6 +1024,7 @@ function applyScene() {
     camera.position.copy(controls.target).add(dir); camera.fov = P.fov; camera.updateProjectionMatrix(); lastFov = P.fov;
   }
   controls.autoRotate = P.autoRotate !== 0; controls.autoRotateSpeed = P.autoRotate * 2;
+  applyFx();
   const bk = `${P.backdrop}|${P.bg}|${P.bdColor}`;
   if (bk !== backdropKey) {
     if (backdrop) { scene.remove(backdrop); disposeObj(backdrop); backdrop = null; }
@@ -877,7 +1091,9 @@ function fmt(spec, v) {
 }
 function set(k, v, lv) {
   P[k] = v; persist();
-  req(lv || SPEC[k]?.lv || 'live'); dirty = true;
+  const l = lv || SPEC[k]?.lv || 'live';
+  if (l !== 'none') req(l);
+  dirty = true; syncVis();
 }
 function fillRange(inp) { const p = (inp.value - inp.min) / (inp.max - inp.min) * 100; inp.style.setProperty('--fill', p + '%'); }
 
@@ -954,19 +1170,44 @@ function buildUI() {
         node = h('div', { class: 'modes', role: 'group', 'aria-label': 'Form' }, btns);
         ctl.mode = { node, sync() { btns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === P.mode))); }, spec: it };
       }
+      else if (it.type === 'image') {
+        const file = h('input', { type: 'file', id: 'c-image', accept: 'image/*' });
+        const thumb = h('img', { alt: '' });
+        file.addEventListener('change', () => { if (file.files[0]) loadImageFile(file.files[0]); file.value = ''; });
+        node = h('div', { class: 'ctl' },
+          h('div', { class: 'lbl' }, h('span', {}, 'Image'), h('output', {}, 'or drop one on the stage')),
+          h('div', { class: 'upload' }, thumb, h('label', { class: 'btn', for: 'c-image' }, 'Choose image…'), file));
+        ctl.image = { node, sync() { thumb.src = userImgThumb || ''; thumb.hidden = !userImgThumb; }, spec: it };
+      } else if (it.type === 'exportBtns') {
+        const b1 = h('button', { class: 'btn', type: 'button', id: 'btnPng', onclick: () => snapshot() }, 'PNG');
+        const b2 = h('button', { class: 'btn', type: 'button', id: 'btnGif', onclick: () => exportGif() }, 'GIF loop');
+        const b3 = h('button', { class: 'btn', type: 'button', id: 'btnVid', onclick: () => recordVideo() }, 'Video');
+        node = h('div', { class: 'ctl' }, h('div', { class: 'exp-btns' }, b1, b2, b3),
+          h('p', { class: 'small' }, 'GIF and video capture exactly one seamless loop of the animation. With Orbit speed on, the camera makes one full turn per loop.'));
+        ctl.exportBtns = { node, sync() {}, spec: it };
+      }
       body.append(node);
     }
   }
 }
-function syncUI() {
-  const mt = (MATS[P.material] || {}).type;
+function syncUI() { for (const k in ctl) ctl[k].sync(); syncVis(); }
+function syncVis() {
+  const mt = (MATS[P.material] || {}).type, tex = P.source !== 'gradient';
+  const rules = {
+    bdColor: P.backdrop !== 'none', bdDist: P.backdrop !== 'none',
+    image: P.source === 'image', gradDir: !tex || P.texUse === 'bump', texUse: tex, imgScale: tex,
+    bump: tex && P.texUse !== 'color' && MESH.includes(P.mode),
+    kinAmp: P.kinetic !== 'none', stagger: P.kinetic !== 'none', beats: P.kinetic !== 'none',
+    bloomRadius: P.bloom > 0, bloomThresh: P.bloom > 0, focus: P.dof > 0,
+  };
   for (const k in ctl) {
-    const c = ctl[k]; c.sync();
+    const c = ctl[k];
     let show = !c.spec.modes || c.spec.modes.includes(P.mode);
     if (c.spec.mat && c.spec.mat !== mt) show = false;
-    if (k === 'bdColor' || k === 'bdDist') show = P.backdrop !== 'none';
+    if (k in rules && !rules[k]) show = false;
     c.node.hidden = !show;
   }
+  frameGuide();
 }
 
 /* --------------------------------------------------------------- presets */
@@ -997,7 +1238,11 @@ function randomize() {
     gradDir: pickOne(['x', 'y', 'depth', 'radial', 'noise', 'none']),
     bg: dark ? hsl(hue, rnd(0.1, 0.4), rnd(0.04, 0.12)) : hsl(hue, rnd(0.05, 0.35), rnd(0.78, 0.92)),
     backdrop: pickOne(['none', 'none', 'stripes', 'checker', 'dots', 'grid', 'gradient']), bdColor: hsl(Math.random(), rnd(0.4, 0.9), rnd(0.3, 0.6)), bdDist: rnd(4, 14),
-    light: (Math.random() * 360) | 0, autoRotate: 0 };
+    light: (Math.random() * 360) | 0, autoRotate: 0,
+    kinetic: Math.random() < 0.4 ? pickOne(['ripple', 'depth', 'swing', 'spin', 'flip', 'pop', 'burst']) : 'none', kinAmp: rnd(0.3, 1.2), stagger: rnd(0.1, 0.8), beats: 1 + ((Math.random() * 2) | 0),
+    source: Math.random() < 0.3 ? pickOne(['marble', 'holo', 'halftone', 'stripes', 'camo']) : 'gradient', texUse: pickOne(['color', 'color', 'bump', 'both']), imgScale: rnd(0.4, 1.6), bump: rnd(0.2, 0.7),
+    bloom: dark && Math.random() < 0.6 ? rnd(0.3, 1.4) : 0, bloomThresh: rnd(0.05, 0.8), bloomRadius: rnd(0.2, 0.8),
+    dof: Math.random() < 0.2 ? rnd(0.2, 0.6) : 0, focus: 0, grain: Math.random() < 0.3 ? rnd(0.1, 0.4) : 0, chroma: Math.random() < 0.2 ? rnd(0.1, 0.5) : 0, vignette: Math.random() < 0.3 ? rnd(0.2, 0.6) : 0 };
   if (!['chrome', 'iridescent', 'normal', 'glass'].includes(material) || Math.random() < 0.3) { v.colorA = hsl(hue + rnd(-0.1, 0.1), rnd(0.5, 1), rnd(0.45, 0.7)); v.colorB = hsl(hue + rnd(0.15, 0.5), rnd(0.5, 1), rnd(0.45, 0.75)); }
   P = v; syncUI(); persist(); req('field');
 }
@@ -1012,13 +1257,6 @@ document.getElementById('btnView').addEventListener('click', () => { fitView([0,
 /* ------------------------------------------------------------- dialogs */
 for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => b.closest('dialog').close());
 const inFrame = (() => { try { return window.self !== window.top; } catch { return true; } })();
-document.getElementById('btnSnap').addEventListener('click', () => {
-  renderer.render(scene, camera);
-  const url = renderer.domElement.toDataURL('image/png');
-  document.getElementById('snapImg').src = url;
-  const dl = document.getElementById('snapDl'); dl.href = url; dl.hidden = inFrame;
-  document.getElementById('snapDlg').showModal();
-});
 const setText = document.getElementById('setText'), setMsg = document.getElementById('setMsg');
 document.getElementById('btnSettings').addEventListener('click', () => { setText.value = JSON.stringify(P, null, 2); setMsg.textContent = ''; document.getElementById('setDlg').showModal(); });
 document.getElementById('setCopy').addEventListener('click', () => {
@@ -1033,27 +1271,290 @@ document.getElementById('setApply').addEventListener('click', () => {
   } catch { setMsg.textContent = 'That is not valid settings JSON. Paste the full block copied from this dialog.'; }
 });
 
+/* --------------------------------------------------------------- saving */
+let downloadsP = null;
+function getDownloads() {
+  if (!downloadsP) downloadsP = (window.claude && typeof window.claude.use === 'function') ? window.claude.use('downloads').catch(() => null) : Promise.resolve(null);
+  return downloadsP;
+}
+async function saveFile(name, blob) {
+  const dl = await getDownloads();
+  if (dl) {
+    try { await dl.save({ filename: name, data: blob }); return 'Saved.'; }
+    catch (e) {
+      if (e?.code === 'declined') return 'Download cancelled.';
+      if (e?.code === 'rate_limited') return 'Another download prompt is open. Try again in a moment.';
+      if (e?.code === 'too_large') return 'That file is too large to save here. Try a smaller size or a shorter loop.';
+      if (!['unavailable', 'not_granted', 'capability_disabled', 'capability_removed'].includes(e?.code)) return `Couldn't save the file (${e?.code || 'error'}).`;
+    }
+  }
+  if (!inFrame) {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000); return 'Downloaded.';
+  }
+  return 'Downloads are not available in this view. Right-click or long-press the preview to save it.';
+}
+const outDlg = document.getElementById('outDlg'), outInfo = document.getElementById('outInfo'), outSave = document.getElementById('outSave');
+let outUrl = null;
+function showOut(title, kind, blob, info, filename) {
+  if (outUrl) URL.revokeObjectURL(outUrl);
+  outUrl = URL.createObjectURL(blob);
+  const el = kind === 'video' ? h('video', { src: outUrl, controls: true, loop: true, autoplay: true, muted: true, playsinline: true })
+    : h('img', { src: outUrl, alt: 'Exported ' + title.toLowerCase() + ' of the current design' });
+  if (kind === 'video') el.muted = true;
+  document.getElementById('outTitle').textContent = title;
+  document.getElementById('outMedia').replaceChildren(el);
+  outInfo.textContent = info;
+  outSave.textContent = `Download ${filename.split('.').pop().toUpperCase()}`;
+  outSave.onclick = async () => { outSave.disabled = true; const msg = await saveFile(filename, blob); outSave.disabled = false; outInfo.textContent = `${info} · ${msg}`; };
+  outDlg.showModal();
+}
+
+/* -------------------------------------------------------------- images */
+const IMG_STORE = 'glyph-matter:img';
+let userImgThumb = '';
+function useImage(img, thumb) {
+  userImg = img; userImgVer++; userImgThumb = thumb; ctl.image?.sync(); req('geo');
+}
+function loadImageFile(file) {
+  if (!file.type.startsWith('image/')) { setStatus('That file is not an image. Use a PNG, JPEG, WebP or GIF.', true); return; }
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas'), sc = Math.min(1, 640 / Math.max(img.width, img.height));
+    c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    const thumb = c.toDataURL('image/jpeg', 0.85);
+    try { localStorage.setItem(IMG_STORE, thumb); } catch {}
+    P.source = 'image'; persist(); useImage(img, thumb); syncUI();
+  };
+  img.onerror = () => setStatus('That image could not be read. Try a PNG or JPEG.', true);
+  img.src = url;
+}
+try {
+  const saved = localStorage.getItem(IMG_STORE);
+  if (saved) { const img = new Image(); img.onload = () => useImage(img, saved); img.src = saved; }
+} catch {}
+let dragDepth = 0;
+document.addEventListener('dragenter', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { dragDepth++; document.body.classList.add('dropping'); } });
+document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dropping'); } });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
+  const f = e.dataTransfer?.files?.[0]; if (f) loadImageFile(f);
+});
+
+/* -------------------------------------------------------------- capture */
+const FRAMES = { '16:9': 16 / 9, '1:1': 1, '4:5': 0.8, '9:16': 9 / 16 };
+function frameAspect() { const r = stage.getBoundingClientRect(); return FRAMES[P.frame] || (r.width / Math.max(1, r.height)); }
+function guideRect() {
+  const r = stage.getBoundingClientRect(), a = frameAspect();
+  let gw = r.width, gh = r.width / a; if (gh > r.height) { gh = r.height; gw = gh * a; }
+  return { gw, gh, sw: r.width, sh: r.height };
+}
+function frameGuide() {
+  const g = document.getElementById('guide'); if (!g) return;
+  if (P.frame === 'screen') { g.hidden = true; return; }
+  const { gw, gh, sw, sh } = guideRect();
+  Object.assign(g.style, { width: gw + 'px', height: gh + 'px', left: (sw - gw) / 2 + 'px', top: (sh - gh) / 2 + 'px' });
+  g.hidden = false;
+}
+function frameSize(long) {
+  const a = frameAspect(); let w, h;
+  if (a >= 1) { w = long; h = long / a; } else { h = long; w = long * a; }
+  return [Math.round(w / 2) * 2, Math.round(h / 2) * 2];
+}
+let CAP = null, busy = false, playing = true;
+const PR = Math.min(devicePixelRatio || 1, 2), UP = new THREE.Vector3(0, 1, 0);
+function beginCapture(w, h) {
+  const { gh, sh } = guideRect();
+  CAP = { pos: camera.position.clone(), tgt: controls.target.clone() };
+  controls.enabled = false;
+  renderer.setPixelRatio(1); renderer.setSize(w, h, false); composer.setPixelRatio(1); composer.setSize(w, h);
+  camera.aspect = w / h; camera.fov = 2 * Math.atan(Math.tan(P.fov * Math.PI / 360) * gh / sh) * 180 / Math.PI; camera.updateProjectionMatrix();
+}
+function captureAt(ph) {
+  setPhase(ph);
+  const v = CAP.pos.clone().sub(CAP.tgt);
+  if (P.autoRotate) v.applyAxisAngle(UP, Math.sign(P.autoRotate) * ph * Math.PI * 2);
+  camera.position.copy(CAP.tgt).add(v); camera.lookAt(CAP.tgt);
+  current?.update(); render();
+}
+function endCapture() {
+  camera.position.copy(CAP.pos); controls.target.copy(CAP.tgt); camera.fov = P.fov;
+  CAP = null; controls.enabled = true; resize(); dirty = true;
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+function setBusy(b) { busy = b; for (const id of ['btnPng', 'btnGif', 'btnVid', 'btnSnap']) { const e = document.getElementById(id); if (e) e.disabled = b; } }
+function grab(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(renderer.domElement, 0, 0, w, h); return { c, x }; }
+
+async function snapshot() {
+  if (busy || !G) return; setBusy(true);
+  const [w, h] = frameSize(2400);
+  beginCapture(w, h); captureAt(PH); const { c } = grab(w, h); endCapture();
+  const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+  setBusy(false);
+  showOut('Snapshot', 'image', blob, `${w} × ${h} PNG · ${(blob.size / 1048576).toFixed(1)} MB`, 'glyph-matter.png');
+}
+document.getElementById('btnSnap').addEventListener('click', snapshot);
+
+async function exportGif() {
+  if (busy || !G) return; setBusy(true);
+  const a = frameAspect(), w = Math.round(+P.gifWidth / 2) * 2, h = Math.round(w / a / 2) * 2, fps = +P.gifFps;
+  const N = Math.max(2, Math.min(Math.round(P.loopLen * fps), Math.floor(240e6 / (w * h * 4))));
+  const frames = [];
+  beginCapture(w, h);
+  try {
+    for (let i = 0; i < N; i++) {
+      captureAt(i / N); const { x } = grab(w, h); frames.push(x.getImageData(0, 0, w, h).data);
+      if (i % 2 === 0) { setStatus(`Rendering GIF frame ${i + 1} of ${N}`); await tick(); }
+    }
+  } finally { endCapture(); }
+  const bytes = await encodeGif(frames, w, h, N / P.loopLen, p => setStatus(`Encoding GIF ${Math.round(p * 100)}%`));
+  const blob = new Blob([bytes], { type: 'image/gif' });
+  setBusy(false); setStatus(current?.label ? `${current.label} · ${G.cols}×${G.rows} grid` : '');
+  showOut('GIF loop', 'image', blob, `${w} × ${h} · ${N} frames · ${P.loopLen} s loop · ${(blob.size / 1048576).toFixed(1)} MB`, 'glyph-matter.gif');
+}
+
+async function recordVideo() {
+  if (busy || !G) return;
+  const cv = renderer.domElement;
+  if (!cv.captureStream || !window.MediaRecorder) { setStatus('This browser cannot record canvas video. Try Chrome, Edge, Firefox or Safari 17+.', true); return; }
+  const type = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  if (!type) { setStatus('This browser has no supported video format for recording.', true); return; }
+  setBusy(true);
+  const [w, h] = frameSize(Math.abs(frameAspect() - 1) < 0.01 ? 1440 : 1920);
+  beginCapture(w, h);
+  const stream = cv.captureStream(30), chunks = [];
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 16e6 });
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  const done = new Promise(r => { rec.onstop = r; });
+  captureAt(0);
+  rec.start(250);
+  CAP.video = { rec, start: performance.now(), dur: P.loopLen * +P.vidLoops * 1000 };
+  await done;
+  stream.getTracks().forEach(t => t.stop());
+  endCapture(); setBusy(false);
+  const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm', blob = new Blob(chunks, { type: type.split(';')[0] });
+  setStatus(current?.label ? `${current.label} · ${G.cols}×${G.rows} grid` : '');
+  showOut('Video', 'video', blob, `${w} × ${h} ${ext.toUpperCase()} · ${(P.loopLen * +P.vidLoops).toFixed(1)} s · ${(blob.size / 1048576).toFixed(1)} MB`, 'glyph-matter.' + ext);
+}
+
+/* ---------------------------------------------------------- GIF encoder */
+function medianCut(S, K) {
+  let boxes = [Uint32Array.from({ length: S.length / 3 }, (_, i) => i)];
+  const span = b => {
+    const mn = [255, 255, 255], mx = [0, 0, 0];
+    for (let n = 0; n < b.length; n++) { const o = b[n] * 3; for (let c = 0; c < 3; c++) { const v = S[o + c]; if (v < mn[c]) mn[c] = v; if (v > mx[c]) mx[c] = v; } }
+    const r = [mx[0] - mn[0], (mx[1] - mn[1]) * 1.2, mx[2] - mn[2]]; const ch = r.indexOf(Math.max(...r));
+    return { ch, r: r[ch] };
+  };
+  while (boxes.length < K) {
+    let bi = -1, best = 0, bch = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      if (boxes[i].length < 2) continue;
+      const { ch, r } = span(boxes[i]), score = r * Math.sqrt(boxes[i].length);
+      if (score > best) { best = score; bi = i; bch = ch; }
+    }
+    if (bi < 0) break;
+    const arr = Array.from(boxes[bi]).sort((p, q) => S[p * 3 + bch] - S[q * 3 + bch]), m = arr.length >> 1;
+    boxes.splice(bi, 1, Uint32Array.from(arr.slice(0, m)), Uint32Array.from(arr.slice(m)));
+  }
+  return boxes.map(b => { let r = 0, g = 0, bl = 0; for (const i of b) { r += S[i * 3]; g += S[i * 3 + 1]; bl += S[i * 3 + 2]; } const n = Math.max(1, b.length); return [Math.round(r / n), Math.round(g / n), Math.round(bl / n)]; });
+}
+class Bytes {
+  constructor() { this.a = new Uint8Array(1 << 22); this.n = 0; }
+  b(v) { if (this.n >= this.a.length) { const t = new Uint8Array(this.a.length * 2); t.set(this.a); this.a = t; } this.a[this.n++] = v; }
+  w16(v) { this.b(v & 255); this.b((v >> 8) & 255); }
+  str(s) { for (const ch of s) this.b(ch.charCodeAt(0)); }
+}
+const LZW_TABLE = new Int16Array(4096 * 256);
+function lzw(idx, out) {
+  const table = LZW_TABLE; table.fill(0);
+  let size = 9, next = 258, cur = 0, bits = 0, blk = out.n, cnt = 0;
+  out.b(0);
+  const byte = v => { out.b(v); if (++cnt === 255) { out.a[blk] = 255; blk = out.n; out.b(0); cnt = 0; } };
+  const emit = c => { cur |= c << bits; bits += size; while (bits >= 8) { byte(cur & 255); cur >>= 8; bits -= 8; } };
+  emit(256);
+  let prefix = idx[0];
+  for (let i = 1; i < idx.length; i++) {
+    const k = idx[i], key = (prefix << 8) | k, c = table[key];
+    if (c) { prefix = c; continue; }
+    emit(prefix);
+    if (next === 4096) { emit(256); table.fill(0); size = 9; next = 258; }
+    else { if (next >= (1 << size)) size++; table[key] = next++; }
+    prefix = k;
+  }
+  emit(prefix); emit(257);
+  if (bits > 0) byte(cur & 255);
+  out.a[blk] = cnt; if (cnt > 0) out.b(0);
+}
+async function encodeGif(frames, w, h, fps, progress) {
+  const per = Math.max(1, Math.floor(80000 / frames.length)), S = [];
+  for (const f of frames) for (let k = 0; k < per; k++) { const o = ((Math.random() * w * h) | 0) * 4; S.push(f[o], f[o + 1], f[o + 2]); }
+  const pal = medianCut(S, 256); while (pal.length < 256) pal.push([0, 0, 0]);
+  const cache = new Int16Array(32768).fill(-1);
+  const nearest = (r, g, b) => {
+    const key = ((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3); let v = cache[key]; if (v >= 0) return v;
+    const rr = (r & 248) + 4, gg = (g & 248) + 4, bb = (b & 248) + 4; let bd = 1e9;
+    for (let i = 0; i < 256; i++) { const p = pal[i], dr = p[0] - rr, dg = p[1] - gg, db = p[2] - bb, d = 2 * dr * dr + 4 * dg * dg + 3 * db * db; if (d < bd) { bd = d; v = i; } }
+    cache[key] = v; return v;
+  };
+  const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const out = new Bytes();
+  out.str('GIF89a'); out.w16(w); out.w16(h); out.b(0xF7); out.b(0); out.b(0);
+  for (const p of pal) { out.b(p[0]); out.b(p[1]); out.b(p[2]); }
+  out.b(0x21); out.b(0xFF); out.b(11); out.str('NETSCAPE2.0'); out.b(3); out.b(1); out.w16(0); out.b(0);
+  const idx = new Uint8Array(w * h);
+  for (let f = 0; f < frames.length; f++) {
+    const d = frames[f];
+    for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i++) {
+      const t = (bayer[((y & 3) << 2) | (x & 3)] - 7.5) * 0.8, o = i * 4;
+      const r = Math.min(255, Math.max(0, d[o] + t)), g = Math.min(255, Math.max(0, d[o + 1] + t)), b = Math.min(255, Math.max(0, d[o + 2] + t));
+      idx[i] = nearest(r | 0, g | 0, b | 0);
+    }
+    const delay = Math.round((f + 1) * 100 / fps) - Math.round(f * 100 / fps);
+    out.b(0x21); out.b(0xF9); out.b(4); out.b(0x04); out.w16(delay); out.b(0); out.b(0);
+    out.b(0x2C); out.w16(0); out.w16(0); out.w16(w); out.w16(h); out.b(0);
+    out.b(8); lzw(idx, out);
+    progress((f + 1) / frames.length); await tick();
+  }
+  out.b(0x3B);
+  return out.a.slice(0, out.n);
+}
+
 /* ----------------------------------------------------------------- loop */
 function resize() {
+  if (CAP) return;
   const r = stage.getBoundingClientRect(); if (!r.width || !r.height) return;
-  renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); dirty = true;
+  renderer.setPixelRatio(PR); renderer.setSize(r.width, r.height, false);
+  composer.setPixelRatio(PR); composer.setSize(r.width, r.height);
+  camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); dirty = true; frameGuide();
 }
 new ResizeObserver(resize).observe(stage); resize();
 const hint = document.getElementById('hint');
 renderer.domElement.addEventListener('pointerdown', () => hint.classList.add('gone'), { once: true });
+const btnPlay = document.getElementById('btnPlay');
+btnPlay.addEventListener('click', () => { playing = !playing; btnPlay.textContent = playing ? 'Pause' : 'Play'; btnPlay.setAttribute('aria-pressed', String(!playing)); });
 
-const clock = new THREE.Clock(); let T = 0;
+const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
-  processQueue();
   const dt = Math.min(0.05, clock.getDelta());
-  const moving = P.speed > 0 && (P.noise > 0 || P.wave > 0 || (P.mode === 'voxels' && P.spin > 0));
-  if (moving) T += dt * P.speed;
-  if (current && G && (moving || dirty)) { current.update(T); dirty = false; }
+  if (CAP) {
+    if (CAP.video) {
+      const el = performance.now() - CAP.video.start;
+      if (el >= CAP.video.dur) { if (CAP.video.rec.state === 'recording') CAP.video.rec.stop(); }
+      else { captureAt((el / 1000 / P.loopLen) % 1); setStatus(`Recording ${(el / 1000).toFixed(1)} of ${(CAP.video.dur / 1000).toFixed(1)} s`); }
+    }
+    return;
+  }
+  processQueue();
+  const anim = P.kinetic !== 'none' || (P.speed > 0 && (P.noise > 0 || P.wave > 0 || (P.mode === 'voxels' && P.spin > 0)));
+  if (anim && playing) setPhase((PH + dt / P.loopLen) % 1); else if (dirty) setPhase(PH);
+  if (current && G && ((anim && playing) || dirty)) { current.update(); dirty = false; }
   controls.update();
-  renderer.render(scene, camera);
+  render();
 }
-buildUI(); syncUI(); req('glyph'); frame();
+buildUI(); syncUI(); req('glyph'); getDownloads(); frame();
 </script>
 </body>
 </html>
