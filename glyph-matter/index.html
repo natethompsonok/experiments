@@ -38,6 +38,7 @@
   color-scheme: dark;
 }
 
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.4 var(--f-ui); }
 * { box-sizing: border-box; }
@@ -73,6 +74,7 @@ button.pill:hover { border-color: var(--accent); }
   display: flex; flex-direction: column; gap: 14px;
   scrollbar-width: thin;
 }
+.panel > * { flex-shrink: 0; }
 .brand { display: flex; flex-direction: column; gap: 2px; }
 .brand h1 {
   margin: 0; font: 800 34px/0.9 var(--f-display); font-variation-settings: "opsz" 96; letter-spacing: -0.035em;
@@ -144,6 +146,16 @@ input[type="color"] { width: 44px; height: 26px; border: 1px solid var(--line); 
 .font-row { display: flex; gap: 6px; }
 .font-row select, .font-row input { flex: 1; min-width: 0; }
 
+.viewtoggle { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.viewtoggle button { border: 0; background: var(--chip); padding: 7px; cursor: pointer; font-size: 12.5px; font-weight: 500; }
+.viewtoggle button[aria-pressed="true"] { background: var(--ink); color: var(--panel); }
+.audio-box { display: flex; flex-direction: column; gap: 8px; }
+.audio-row { display: flex; gap: 8px; align-items: center; }
+.audio-row .name { flex: 1; min-width: 0; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-row .time { font: 500 11.5px/1 var(--f-mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wave { width: 100%; height: 46px; display: block; border-radius: 6px; background: var(--chip); border: 1px solid var(--line); cursor: pointer; touch-action: none; }
+.meters { width: 100%; height: 38px; display: block; }
+.audio-box input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .foot { display: flex; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 14px; }
 .small { font-size: 11.5px; color: var(--muted); margin: 0; }
 
@@ -159,7 +171,7 @@ dialog h2 { margin: 0; font: 700 20px/1.1 var(--f-display); }
 
 .guide { position: absolute; border: 1.5px dashed var(--accent); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.28); pointer-events: none; z-index: 1; }
 .stage canvas { object-fit: contain; }
-.dropping .stage::after { content: "Drop an image to map it onto the letters"; position: absolute; inset: 12px; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--overlay); font: 600 15px var(--f-ui); color: var(--ink); z-index: 4; }
+.dropping .stage::after { content: "Drop an image to texture the letters, or a sound clip to drive them"; position: absolute; inset: 12px; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: 12px; background: var(--overlay); font: 600 15px var(--f-ui); color: var(--ink); z-index: 4; }
 dialog video { display: block; width: 100%; border-radius: 8px; border: 1px solid var(--line); background: #000; }
 .upload { display: flex; gap: 8px; align-items: center; }
 .upload img { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); background: var(--chip); }
@@ -199,6 +211,9 @@ dialog video { display: block; width: 100%; border-radius: 8px; border: 1px soli
     <div class="brand">
       <h1>Glyph Matter</h1>
       <p>Generative type as form, material and space.</p>
+    </div>
+    <div class="viewtoggle" role="group" aria-label="Panel view">
+      <button type="button" id="viewSimple" aria-pressed="false">Simple</button><button type="button" id="viewAll" aria-pressed="true">All controls</button>
     </div>
     <div class="row">
       <select id="presetSel" aria-label="Preset"></select>
@@ -311,6 +326,21 @@ const SCHEMA = [
     { k: 'tracking', type: 'range', min: -0.15, max: 0.8, step: 0.01, def: 0.0, lv: 'glyph', label: 'Tracking', unit: 'em' },
     { k: 'leading', type: 'range', min: 0.6, max: 1.8, step: 0.01, def: 0.92, lv: 'glyph', label: 'Leading' },
   ]},
+  { sec: 'Sound', items: [
+    { k: 'audio', type: 'audio' },
+    { k: 'soundPreset', type: 'select', def: 'pulse', lv: 'soundpreset', label: 'Reaction', options: [['pulse', 'Pulse: bass swells the letters'], ['liquid', 'Liquid: sound flows through the form'], ['glitch', 'Glitch: highs fringe, beats kick'], ['speech', 'Speech: voice moves the letters'], ['words', 'Word cycle: new word on each beat'], ['custom', 'Custom']] },
+    { k: 'sens', type: 'range', min: 0, max: 2.5, step: 0.01, def: 1, lv: 'none', label: 'Sensitivity' },
+    { k: 'mapLevel', type: 'select', def: 'scale', lv: 'none', label: 'Loudness drives', options: [['none', 'Nothing'], ['depth', 'Depth'], ['scale', 'Size pulse'], ['noise', 'Noise'], ['wave', 'Wave'], ['twist', 'Twist'], ['bend', 'Bend'], ['scatter', 'Scatter'], ['tumble', 'Tumble'], ['letters', 'Letter motion'], ['bloom', 'Bloom'], ['chroma', 'Colour fringe'], ['grain', 'Grain'], ['exposure', 'Brightness']] },
+    { k: 'mapBass', type: 'select', def: 'depth', lv: 'none', label: 'Bass drives', options: [['none', 'Nothing'], ['depth', 'Depth'], ['scale', 'Size pulse'], ['noise', 'Noise'], ['wave', 'Wave'], ['twist', 'Twist'], ['bend', 'Bend'], ['scatter', 'Scatter'], ['tumble', 'Tumble'], ['letters', 'Letter motion'], ['bloom', 'Bloom'], ['chroma', 'Colour fringe'], ['grain', 'Grain'], ['exposure', 'Brightness']] },
+    { k: 'mapMid', type: 'select', def: 'none', lv: 'none', label: 'Mids drive', options: [['none', 'Nothing'], ['depth', 'Depth'], ['scale', 'Size pulse'], ['noise', 'Noise'], ['wave', 'Wave'], ['twist', 'Twist'], ['bend', 'Bend'], ['scatter', 'Scatter'], ['tumble', 'Tumble'], ['letters', 'Letter motion'], ['bloom', 'Bloom'], ['chroma', 'Colour fringe'], ['grain', 'Grain'], ['exposure', 'Brightness']] },
+    { k: 'mapHigh', type: 'select', def: 'bloom', lv: 'none', label: 'Highs drive', options: [['none', 'Nothing'], ['depth', 'Depth'], ['scale', 'Size pulse'], ['noise', 'Noise'], ['wave', 'Wave'], ['twist', 'Twist'], ['bend', 'Bend'], ['scatter', 'Scatter'], ['tumble', 'Tumble'], ['letters', 'Letter motion'], ['bloom', 'Bloom'], ['chroma', 'Colour fringe'], ['grain', 'Grain'], ['exposure', 'Brightness']] },
+    { k: 'beatAct', type: 'select', def: 'flash', lv: 'none', label: 'On each beat', options: [['none', 'Nothing'], ['flash', 'Flash'], ['kick', 'Camera kick'], ['burst', 'Letters jump'], ['step', 'Step the animation'], ['word', 'Show the next word']] },
+    { k: 'words', type: 'textarea', def: 'SOFT\nLOUD\nMATTER\nNOISE', lv: 'none', label: 'Beat words', note: 'One per line' },
+    { k: 'wordEvery', type: 'range', min: 1, max: 8, step: 1, def: 1, lv: 'none', label: 'Change word every', unit: ' beats' },
+    { k: 'smoothing', type: 'range', min: 0, max: 1, step: 0.01, def: 0.5, lv: 'none', label: 'Smoothing' },
+    { k: 'credit', type: 'text', def: '', lv: 'scene', label: 'Credit line', placeholder: 'Music: Artist — Track title' },
+    { k: 'showCredit', type: 'toggle', def: true, lv: 'scene', label: 'Show credit on screen and in exports' },
+  ]},
   { sec: 'Form', items: [
     { k: 'mode', type: 'modes', def: 'inflate', lv: 'geo' },
     { k: 'res', type: 'range', min: 40, max: 320, step: 4, def: 160, lv: 'field', label: 'Resolution', unit: ' cols' },
@@ -397,7 +427,7 @@ const SCHEMA = [
     { k: 'frame', type: 'select', def: 'screen', lv: 'none', label: 'Frame', options: [['screen', 'Fit screen'], ['16:9', '16:9 landscape'], ['1:1', '1:1 square'], ['4:5', '4:5 portrait'], ['9:16', '9:16 story']] },
     { k: 'gifWidth', type: 'select', def: '480', lv: 'none', label: 'GIF width', options: [['320', '320 px'], ['480', '480 px'], ['640', '640 px'], ['800', '800 px']] },
     { k: 'gifFps', type: 'select', def: '15', lv: 'none', label: 'GIF frame rate', options: [['10', '10 fps'], ['15', '15 fps'], ['20', '20 fps'], ['25', '25 fps']] },
-    { k: 'vidLoops', type: 'select', def: '1', lv: 'none', label: 'Video length', options: [['1', '1 loop'], ['2', '2 loops'], ['4', '4 loops']] },
+    { k: 'vidLoops', type: 'select', def: '1', lv: 'none', label: 'Video length', options: [['1', '1 loop'], ['2', '2 loops'], ['4', '4 loops'], ['clip', 'Whole sound clip, with audio']] },
     { k: 'exportBtns', type: 'exportBtns' },
   ]},
 ];
@@ -426,6 +456,16 @@ const PRESETS = {
   'Burst apart': { mode: 'particles', perCell: 4, pointSize: 0.08, opacity: 1, kinetic: 'burst', kinAmp: 1, stagger: 0.25, noise: 0.3, glow: true, bloom: 0.9, bloomThresh: 0.1, chroma: 0.4, bg: '#0a0b0f', backdrop: 'none', colorA: '#ffd36b', colorB: '#ff3d7f', gradDir: 'x' },
   'Particle drift': { mode: 'particles', perCell: 5, pointSize: 0.11, opacity: 1, noise: 0.8, noiseScale: 0.5, speed: 0.3, glow: true, bg: '#0b0c10', backdrop: 'none', colorA: '#ffffff', colorB: '#7d8cff', gradDir: 'depth' },
 };
+const SOUND_PRESETS = {
+  pulse:  { mapLevel: 'scale', mapBass: 'depth', mapMid: 'none', mapHigh: 'bloom', beatAct: 'flash' },
+  liquid: { mapLevel: 'wave', mapBass: 'noise', mapMid: 'twist', mapHigh: 'none', beatAct: 'step' },
+  glitch: { mapLevel: 'none', mapBass: 'scatter', mapMid: 'none', mapHigh: 'chroma', beatAct: 'kick' },
+  speech: { mapLevel: 'letters', mapBass: 'none', mapMid: 'depth', mapHigh: 'grain', beatAct: 'none' },
+  words:  { mapLevel: 'scale', mapBass: 'depth', mapMid: 'none', mapHigh: 'none', beatAct: 'word' },
+};
+const SOUND_KEYS = ['soundPreset', 'sens', 'mapLevel', 'mapBass', 'mapMid', 'mapHigh', 'beatAct', 'words', 'wordEvery', 'smoothing', 'credit', 'showCredit', 'frame', 'gifWidth', 'gifFps', 'vidLoops'];
+const SIMPLE = new Set(['text', 'font', 'weight', 'audio', 'soundPreset', 'sens', 'words', 'wordEvery', 'credit', 'showCredit', 'mode', 'depth', 'roundness', 'noise', 'speed',
+  'kinetic', 'material', 'colors', 'source', 'image', 'bg', 'backdrop', 'bloom', 'frame', 'vidLoops', 'exportBtns']);
 function presetValues(name) {
   const pr = PRESETS[name] || {};
   const v = Object.assign({}, DEF, matValues(pr.material || DEF.material), pr);
@@ -478,9 +518,9 @@ const composer = new EffectComposer(renderer);
 const bokeh = new BokehPass(scene, camera, { focus: 20, aperture: 0, maxblur: 0.012 });
 const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0, 0.45, 0.7);
 const finish = new ShaderPass({
-  uniforms: { tDiffuse: { value: null }, uSeed: { value: 0 }, uGrain: { value: 0 }, uChroma: { value: 0 }, uVignette: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uSeed: { value: 0 }, uGrain: { value: 0 }, uChroma: { value: 0 }, uVignette: { value: 0 }, tCap: { value: null }, uCap: { value: 0 } },
   vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-  fragmentShader: `uniform sampler2D tDiffuse; uniform float uSeed, uGrain, uChroma, uVignette; varying vec2 vUv;
+  fragmentShader: `uniform sampler2D tDiffuse, tCap; uniform float uSeed, uGrain, uChroma, uVignette, uCap; varying vec2 vUv;
     float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
     void main(){
       vec2 d = vUv - 0.5; float r = length(d); vec2 off = d * uChroma * 0.025;
@@ -488,6 +528,7 @@ const finish = new ShaderPass({
       c.r = texture2D(tDiffuse, vUv + off).r; c.b = texture2D(tDiffuse, vUv - off).b;
       c.rgb *= 1.0 - uVignette * smoothstep(0.2, 0.85, r);
       c.rgb += (hash(vUv * vec2(1733.0, 947.0) + uSeed) - 0.5) * uGrain * 0.28;
+      if (uCap > 0.5) { vec4 k = texture2D(tCap, vUv); c.rgb = mix(c.rgb, k.rgb, k.a); }
       gl_FragColor = c;
     }`,
 });
@@ -496,10 +537,36 @@ function applyFx() {
   bloom.enabled = P.bloom > 0; bloom.strength = P.bloom; bloom.radius = P.bloomRadius; bloom.threshold = P.bloomThresh;
   bokeh.enabled = P.dof > 0;
   bokeh.uniforms.aperture.value = P.dof * P.dof * 0.012; bokeh.uniforms.maxblur.value = 0.004 + P.dof * 0.016;
-  finish.enabled = P.grain > 0 || P.chroma > 0 || P.vignette > 0;
+  const cap = P.showCredit && !!(P.credit || '').trim();
+  finish.uniforms.uCap.value = cap ? 1 : 0;
+  finish.enabled = cap || P.grain > 0 || P.chroma > 0 || P.vignette > 0;
   Object.assign(finish.uniforms.uGrain, { value: P.grain }); finish.uniforms.uChroma.value = P.chroma; finish.uniforms.uVignette.value = P.vignette;
 }
+/* Credit line: drawn into a canvas the size of the output and composited in the finishing pass, so it appears in exports. */
+const capCan = document.createElement('canvas'), capTex = new THREE.CanvasTexture(capCan);
+capTex.minFilter = THREE.LinearFilter; capTex.generateMipmaps = false;
+finish.uniforms.tCap.value = capTex;
+let capKey = '';
+function updateCaption() {
+  const v = renderer.getDrawingBufferSize(new THREE.Vector2()), txt = (P.credit || '').trim();
+  const key = `${v.x}|${v.y}|${txt}|${P.bg}|${P.showCredit}`;
+  if (key === capKey) return; capKey = key;
+  const sc = Math.min(1, 1600 / Math.max(1, v.x));
+  capCan.width = Math.max(2, Math.round(v.x * sc)); capCan.height = Math.max(2, Math.round(v.y * sc));
+  const x = capCan.getContext('2d'); x.clearRect(0, 0, capCan.width, capCan.height);
+  if (txt && P.showCredit) {
+    const lum = new THREE.Color(P.bg).getHSL({}).l, fs = Math.max(10, Math.round(Math.min(capCan.width, capCan.height) * 0.022)), pad = Math.round(fs * 1.4);
+    x.font = `500 ${fs}px "JetBrains Mono", ui-monospace, monospace`; x.textBaseline = 'top'; x.textAlign = 'right';
+    const tw = Math.min(capCan.width - pad * 2, x.measureText(txt).width);
+    x.fillStyle = lum > 0.55 ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+    x.fillRect(capCan.width - pad - tw - fs * 0.6, pad - fs * 0.45, tw + fs * 1.2, fs * 1.9);
+    x.fillStyle = lum > 0.55 ? 'rgba(14,16,21,0.9)' : 'rgba(255,255,255,0.92)';
+    x.fillText(txt, capCan.width - pad, pad, capCan.width - pad * 2);
+  }
+  capTex.needsUpdate = true;
+}
 function render() {
+  updateCaption();
   bokeh.uniforms.focus.value = Math.max(0.1, camera.position.distanceTo(controls.target) + P.focus);
   finish.uniforms.uSeed.value = (finish.uniforms.uSeed.value + 0.137) % 10;
   composer.render();
@@ -520,11 +587,11 @@ function makeBackdropTex(kind, c1, c2) {
 }
 
 /* ---------------------------------------------------------------- glyphs */
-let LETTERS = [];
+let LETTERS = [], WORD = null, noFitOnce = false;
 const gCan = document.createElement('canvas');
 const gCtx = gCan.getContext('2d', { willReadFrequently: true });
 function renderGlyphs() {
-  const fs = 200, lines = (P.text && P.text.length ? P.text : ' ').split('\n');
+  const txt = WORD ?? P.text, fs = 200, lines = (txt && txt.length ? txt : ' ').split('\n');
   const font = `${P.weight} ${fs}px "${P.font}", sans-serif`;
   gCtx.font = font;
   const track = P.tracking * fs;
@@ -660,8 +727,10 @@ function setPhase(ph) {
   KPH = a * P.beats;
 }
 let DX = 0, DY = 0, DZ = 0, AT = 0, AB = 0, AKX = 0, AKY = 0, AKZ = 0, KS = 1;
+let AZ = 1, ASC = 1, KICK = 0; // live audio modulation: depth gain, object scale, per-letter jump
 function deform(x, y, z, sx, sy, sz, lid, lw) {
   AT = 0; AB = 0; AKX = 0; AKY = 0; AKZ = 0; KS = 1;
+  z *= AZ;
   if (P.kinetic !== 'none' && lid >= 0 && lw > 0) {
     const cx = G.LCX[lid], cy = G.LCY[lid]; let lx = x - cx, ly = y - cy, lz = z;
     const a = KPH - lid * P.stagger, s = Math.sin(a), A = P.kinAmp * lw;
@@ -676,6 +745,7 @@ function deform(x, y, z, sx, sy, sz, lid, lw) {
     }
     x = cx + lx; y = cy + ly; z = lz;
   }
+  if (KICK > 0 && lid >= 0 && lw > 0) { const o = lid * 3, e = KICK * lw * 1.4; x += G.LR[o] * e; y += G.LR[o + 1] * e; z += G.LR[o + 2] * e; }
   if (P.scatter) { x += sx * P.scatter; y += sy * P.scatter; z += sz * P.scatter; }
   if (P.skew) x += y * P.skew;
   if (P.noise) {
@@ -886,7 +956,7 @@ function buildVoxels() {
           rz += P.spin * noise3(bx[n] * s + NB * 0.4, by[n] * s - NA * 0.4, 13.1) * 2;
         }
         _q.setFromEuler(_e.set(rx, ry, rz));
-        if (stretch) _s.set(ks, ks, Math.max(ks * 0.25, bh[n] * 2 * KS)); else _s.set(ks, ks, ks);
+        if (stretch) _s.set(ks, ks, Math.max(ks * 0.25, bh[n] * 2 * KS * AZ)); else _s.set(ks, ks, ks);
         mesh.setMatrixAt(n, _m.compose(_p, _q, _s));
       }
       mesh.instanceMatrix.needsUpdate = true;
@@ -1062,7 +1132,7 @@ function processQueue() {
 }
 async function rebuildGlyph() {
   const tok = ++glyphToken, fam = P.font;
-  setStatus(`Loading ${fam}…`);
+  if (!document.fonts.check(`${P.weight} 200px "${fam}"`)) setStatus(`Loading ${fam}…`);
   let ok = true;
   try {
     await ensureFont(fam);
@@ -1070,7 +1140,8 @@ async function rebuildGlyph() {
     ok = document.fonts.check(`${P.weight} 200px "${fam}"`);
   } catch { ok = false; }
   if (tok !== glyphToken) return;
-  renderGlyphs(); req('field'); if (!fitNext) fitNext = true;
+  renderGlyphs(); req('field');
+  if (noFitOnce) noFitOnce = false; else if (!fitNext) fitNext = true;
   if (!ok) setTimeout(() => setStatus(`Couldn't load “${fam}” from Google Fonts. Check the spelling; showing a fallback face.`, true), 0);
 }
 
@@ -1101,7 +1172,7 @@ function buildUI() {
   const root = document.getElementById('controls');
   for (const sec of SCHEMA) {
     const body = h('div', { class: 'sec-body' });
-    root.append(h('details', { class: 'sec', open: true }, h('summary', {}, sec.sec), body));
+    root.append(h('details', { class: 'sec', open: true, 'data-sec': sec.sec }, h('summary', {}, sec.sec), body));
     for (const it of sec.items) {
       const id = 'c-' + it.k; let node;
       if (it.type === 'range') {
@@ -1121,6 +1192,8 @@ function buildUI() {
         const sel = h('select', { id }, it.options.map(([v, l]) => h('option', { value: v }, l)));
         sel.addEventListener('change', () => {
           if (it.lv === 'matpreset') { P.material = sel.value; Object.assign(P, matValues(sel.value)); syncUI(); persist(); req('geo'); }
+          else if (it.lv === 'soundpreset') { P.soundPreset = sel.value; Object.assign(P, SOUND_PRESETS[sel.value] || {}); syncUI(); persist(); }
+          else if (['mapLevel', 'mapBass', 'mapMid', 'mapHigh', 'beatAct'].includes(it.k)) { P.soundPreset = 'custom'; set(it.k, sel.value); ctl.soundPreset.sync(); }
           else set(it.k, sel.value);
         });
         node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label)), sel);
@@ -1138,10 +1211,18 @@ function buildUI() {
           h('div', { class: 'ctl inline' }, h('label', { class: 'lbl', for: 'c-colorB' }, h('span', {}, 'Colour B')), b));
         ctl.colors = { node, sync() { a.value = P.colorA; b.value = P.colorB; }, spec: it };
       } else if (it.type === 'textarea') {
-        const ta = h('textarea', { id, rows: 2, spellcheck: 'false' });
-        let tt = 0; ta.addEventListener('input', () => { clearTimeout(tt); tt = setTimeout(() => set('text', ta.value), 180); });
-        node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label), h('output', {}, 'Enter = new line')), ta);
-        ctl.text = { node, sync() { if (document.activeElement !== ta) ta.value = P.text; }, spec: it };
+        const ta = h('textarea', { id, rows: it.k === 'text' ? 2 : 3, spellcheck: 'false' });
+        let tt = 0; ta.addEventListener('input', () => { clearTimeout(tt); tt = setTimeout(() => { set(it.k, ta.value); if (it.k === 'words') WORDS_DIRTY = true; }, 180); });
+        node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label), h('output', {}, it.note || 'Enter = new line')), ta);
+        ctl[it.k] = { node, sync() { if (document.activeElement !== ta) ta.value = P[it.k]; }, spec: it };
+      } else if (it.type === 'text') {
+        const inp = h('input', { type: 'text', id, placeholder: it.placeholder || '', autocomplete: 'off' });
+        inp.addEventListener('input', () => set(it.k, inp.value));
+        node = h('div', { class: 'ctl' }, h('label', { class: 'lbl', for: id }, h('span', {}, it.label)), inp);
+        ctl[it.k] = { node, sync() { if (document.activeElement !== inp) inp.value = P[it.k]; }, spec: it };
+      } else if (it.type === 'audio') {
+        node = buildAudioUI();
+        ctl.audio = { node, sync() { syncAudioUI(); }, spec: it };
       } else if (it.type === 'font') {
         const sel = h('select', { id, 'aria-label': 'Typeface' });
         const cat = h('output', {});
@@ -1183,7 +1264,7 @@ function buildUI() {
         const b2 = h('button', { class: 'btn', type: 'button', id: 'btnGif', onclick: () => exportGif() }, 'GIF loop');
         const b3 = h('button', { class: 'btn', type: 'button', id: 'btnVid', onclick: () => recordVideo() }, 'Video');
         node = h('div', { class: 'ctl' }, h('div', { class: 'exp-btns' }, b1, b2, b3),
-          h('p', { class: 'small' }, 'GIF and video capture exactly one seamless loop of the animation. With Orbit speed on, the camera makes one full turn per loop.'));
+          h('p', { class: 'small' }, 'GIF and video capture one seamless loop. With a sound clip loaded, choose “Whole sound clip” to record the full clip with its audio. GIF and PNG don’t react to sound.'));
         ctl.exportBtns = { node, sync() {}, spec: it };
       }
       body.append(node);
@@ -1195,6 +1276,7 @@ function syncVis() {
   const mt = (MATS[P.material] || {}).type, tex = P.source !== 'gradient';
   const rules = {
     bdColor: P.backdrop !== 'none', bdDist: P.backdrop !== 'none',
+    words: P.beatAct === 'word', wordEvery: P.beatAct === 'word',
     image: P.source === 'image', gradDir: !tex || P.texUse === 'bump', texUse: tex, imgScale: tex,
     bump: tex && P.texUse !== 'color' && MESH.includes(P.mode),
     kinAmp: P.kinetic !== 'none', stagger: P.kinetic !== 'none', beats: P.kinetic !== 'none',
@@ -1205,8 +1287,10 @@ function syncVis() {
     let show = !c.spec.modes || c.spec.modes.includes(P.mode);
     if (c.spec.mat && c.spec.mat !== mt) show = false;
     if (k in rules && !rules[k]) show = false;
+    if (simpleView && !SIMPLE.has(k)) show = false;
     c.node.hidden = !show;
   }
+  for (const d of document.querySelectorAll('details.sec')) d.hidden = ![...d.querySelector('.sec-body').children].some(n => !n.hidden);
   frameGuide();
 }
 
@@ -1215,6 +1299,7 @@ const presetSel = document.getElementById('presetSel');
 presetSel.append(h('option', { value: '' }, 'Presets…'), ...Object.keys(PRESETS).map(n => h('option', { value: n }, n)));
 function applyValues(v, cam) {
   const keep = { text: P.text, font: P.font, weight: P.weight, tracking: P.tracking, leading: P.leading };
+  for (const k of SOUND_KEYS) keep[k] = P[k];
   P = Object.assign({}, DEF, v, keep);
   syncUI(); persist(); req('field'); fitNext = cam || true;
 }
@@ -1250,6 +1335,7 @@ document.getElementById('btnRandom').addEventListener('click', randomize);
 document.addEventListener('keydown', e => {
   if (e.target.closest('input, textarea, select') || e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'r' || e.key === 'R') randomize();
+  if (e.key === ' ' && abuf && !e.target.closest('button')) { e.preventDefault(); aPlaying ? stopAudio() : playAudio(); }
 });
 document.getElementById('btnResetAll').addEventListener('click', () => { applyValues(presetValues('Liquid chrome'), [0, 0, 1]); Object.assign(P, { text: DEF.text, font: DEF.font, weight: DEF.weight, tracking: DEF.tracking, leading: DEF.leading }); syncUI(); req('glyph'); });
 document.getElementById('btnView').addEventListener('click', () => { fitView([0, 0, 1]); });
@@ -1310,6 +1396,182 @@ function showOut(title, kind, blob, info, filename) {
   outDlg.showModal();
 }
 
+/* ---------------------------------------------------------------- sound */
+// A clip is decoded into memory and played through an analyser; band energies and beats then modulate the design each frame.
+let AC = null, AN = null, abuf = null, asrc = null, aStart = 0, aOffset = 0, aPlaying = false, audioName = '', recDest = null;
+let FD = null, TD = null;
+const ENV = { level: 0, bass: 0, mid: 0, high: 0 }, PEAK = { level: 0.2, bass: 0.2, mid: 0.2, high: 0.2 }, FLOOR = { level: 0, bass: 0, mid: 0, high: 0 };
+let BEAT = 0, lastBeat = 0, beatCount = 0, WORDS_DIRTY = true, wordList = [], wordIdx = -1;
+const bassHist = []; let prevBass = 0;
+function ensureAudio() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  AN = AC.createAnalyser(); AN.fftSize = 2048; AN.smoothingTimeConstant = 0.35; AN.minDecibels = -95; AN.maxDecibels = -12; AN.connect(AC.destination);
+  FD = new Uint8Array(AN.frequencyBinCount); TD = new Uint8Array(AN.fftSize);
+}
+async function loadAudioFile(file) {
+  try {
+    ensureAudio(); setStatus(`Decoding ${file.name}…`);
+    const data = await file.arrayBuffer();
+    const b = await AC.decodeAudioData(data);
+    stopAudio(); abuf = b; aOffset = 0; audioName = file.name;
+    if (P.vidLoops !== 'clip') { P.vidLoops = 'clip'; persist(); ctl.vidLoops?.sync(); }
+    drawWaveImage(); syncAudioUI();
+    setStatus(`${file.name} · ${fmtTime(b.duration)} loaded. Press Play.`);
+  } catch { setStatus(`Couldn't read “${file.name}” as audio. Try an MP3, WAV, M4A or a video file with sound.`, true); }
+}
+function audioPos() { if (!abuf) return 0; const t = aPlaying ? AC.currentTime - aStart : aOffset; return Math.min(abuf.duration, Math.max(0, t)); }
+function playAudio(from) {
+  if (!abuf) return;
+  AC.resume();
+  if (asrc) { asrc.onended = null; try { asrc.stop(); } catch {} }
+  const off = from ?? aOffset;
+  const n = AC.createBufferSource(); n.buffer = abuf; n.connect(AN);
+  n.onended = () => { if (asrc !== n) return; if (CAP?.video?.clip) { aPlaying = false; aOffset = 0; return; } playAudio(0); };
+  n.start(0, off >= abuf.duration ? 0 : off); aStart = AC.currentTime - (off >= abuf.duration ? 0 : off);
+  asrc = n; aPlaying = true; syncAudioUI();
+}
+function stopAudio() {
+  if (asrc) { aOffset = audioPos(); asrc.onended = null; try { asrc.stop(); } catch {} asrc = null; }
+  aPlaying = false; syncAudioUI();
+  if (WORD !== null) { WORD = null; noFitOnce = true; req('glyph'); }
+}
+function seekAudio(t) { if (!abuf) return; if (aPlaying) playAudio(t); else { aOffset = t; syncAudioUI(); } }
+const fmtTime = t => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+function bandAvg(lo, hi) {
+  const hz = AC.sampleRate / AN.fftSize, a = Math.max(1, Math.floor(lo / hz)), b = Math.min(FD.length - 1, Math.ceil(hi / hz));
+  let sum = 0; for (let i = a; i <= b; i++) sum += FD[i]; return sum / Math.max(1, b - a + 1) / 255;
+}
+function audioStep(dt) {
+  const k = Math.exp(-dt * 7);
+  if (!AN || !aPlaying) { for (const b in ENV) ENV[b] *= k; BEAT *= k; return; }
+  AN.getByteFrequencyData(FD); AN.getByteTimeDomainData(TD);
+  let rms = 0; for (let i = 0; i < TD.length; i++) { const v = (TD[i] - 128) / 128; rms += v * v; }
+  const raw = { level: Math.sqrt(rms / TD.length) * 2.2, bass: bandAvg(30, 150), mid: bandAvg(250, 2000), high: bandAvg(3000, 11000) };
+  const rel = 0.25 * Math.pow(1 - P.smoothing, 2) + 0.015;
+  for (const b in raw) {
+    // Normalise each band against its own recent range so quiet and loud clips both react.
+    PEAK[b] = Math.max(raw[b], PEAK[b] * Math.pow(0.996, dt * 60));
+    FLOOR[b] += (raw[b] - FLOOR[b]) * (raw[b] < FLOOR[b] ? 0.25 : 0.004 * dt * 60);
+    const v = Math.min(1, Math.max(0, (raw[b] - FLOOR[b]) / Math.max(0.04, PEAK[b] - FLOOR[b])));
+    ENV[b] += (v - ENV[b]) * (v > ENV[b] ? 0.55 : rel);
+  }
+  // Beats: bass energy jumping well above its average over the last second.
+  // Beats: a sharp rise in bass energy (onset), compared with recent rises so the threshold adapts to the track.
+  const rise = Math.max(0, raw.bass - prevBass); prevBass = raw.bass;
+  bassHist.push(rise); if (bassHist.length > 40) bassHist.shift();
+  const mean = bassHist.reduce((a, b) => a + b, 0) / bassHist.length;
+  const sd = Math.sqrt(bassHist.reduce((a, b) => a + (b - mean) * (b - mean), 0) / bassHist.length), now = performance.now();
+  if (rise > mean + sd * (1.6 / Math.max(0.3, P.sens)) && rise > 0.02 && now - lastBeat > 220) { lastBeat = now; BEAT = 1; onBeat(); }
+  else BEAT *= k;
+}
+function onBeat() {
+  beatCount++; if (meterCan) meterCan.dataset.beats = beatCount;
+  if (P.beatAct === 'step') setPhase((PH + 0.125) % 1);
+  if (P.beatAct === 'word' && beatCount % Math.max(1, P.wordEvery) === 0) {
+    if (WORDS_DIRTY) { wordList = (P.words || '').split(/\n/).map(w => w.trim()).filter(Boolean); WORDS_DIRTY = false; }
+    if (wordList.length) { wordIdx = (wordIdx + 1) % wordList.length; WORD = wordList[wordIdx].replace(/\\n|\|/g, '\n'); noFitOnce = true; req('glyph'); }
+  }
+}
+function audioOn() { return !!abuf && (aPlaying || BEAT > 0.002 || ENV.level > 0.002 || ENV.bass > 0.002); }
+const MOD_RANGE = { noise: 1.5, wave: 1.2, twist: 2, bend: 0.6, scatter: 3, spin: 2.5, kinAmp: 1.5, bloom: 2.5, chroma: 1, grain: 0.6, exposure: 1.2 };
+const MOD_KEY = { noise: 'noise', wave: 'wave', twist: 'twist', bend: 'bend', scatter: 'scatter', tumble: 'spin', letters: 'kinAmp', bloom: 'bloom', chroma: 'chroma', grain: 'grain', exposure: 'exposure' };
+function audioMods() {
+  AZ = 1; ASC = 1; KICK = 0; camera.zoom = 1;
+  if (!audioOn()) return null;
+  const q = { ...P }, s = P.sens;
+  for (const [mk, v0] of [['mapLevel', ENV.level], ['mapBass', ENV.bass], ['mapMid', ENV.mid], ['mapHigh', ENV.high]]) {
+    const t = P[mk], v = v0 * s; if (!t || t === 'none') continue;
+    if (t === 'depth') AZ += v * 1.8;
+    else if (t === 'scale') ASC += v * 0.28;
+    else { const key = MOD_KEY[t]; q[key] = (q[key] || 0) + v * MOD_RANGE[key]; if (t === 'letters' && q.kinetic === 'none') { q.kinetic = 'ripple'; q.kinAmp = v * MOD_RANGE.kinAmp; } }
+  }
+  if (P.beatAct === 'flash') { q.exposure += BEAT * 0.7 * s; q.bloom += BEAT * 1.4 * s; if (q.bloomThresh > 0.4) q.bloomThresh = 0.4; }
+  if (P.beatAct === 'kick') camera.zoom = 1 + BEAT * 0.14 * s;
+  if (P.beatAct === 'burst') KICK = BEAT * s;
+  if (P.beatAct === 'word') ASC += BEAT * 0.08 * s;
+  return q;
+}
+
+/* Sound panel widgets */
+let waveImg = null, waveCan = null, meterCan = null, playBtn = null, nameEl = null, timeEl = null, themeCol = {};
+function readTheme() { const cs = getComputedStyle(document.documentElement); for (const k of ['accent', 'muted', 'line', 'ink', 'track']) themeCol[k] = cs.getPropertyValue('--' + k).trim() || '#888'; }
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => { readTheme(); drawWaveImage(); });
+function buildAudioUI() {
+  readTheme();
+  const file = h('input', { type: 'file', id: 'c-audio', accept: 'audio/*,video/*' });
+  file.addEventListener('change', () => { if (file.files[0]) loadAudioFile(file.files[0]); file.value = ''; });
+  playBtn = h('button', { class: 'btn primary', type: 'button', id: 'btnAudio', onclick: () => { if (!abuf) { file.click(); return; } aPlaying ? stopAudio() : playAudio(); } }, 'Play');
+  nameEl = h('span', { class: 'name' }, 'No clip loaded'); timeEl = h('span', { class: 'time' }, '0:00');
+  waveCan = h('canvas', { class: 'wave', 'aria-label': 'Waveform. Click to jump to a point in the clip.' });
+  meterCan = h('canvas', { class: 'meters', 'aria-hidden': 'true' });
+  const seekFrom = e => { if (!abuf) return; const r = waveCan.getBoundingClientRect(); seekAudio(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * abuf.duration); };
+  waveCan.addEventListener('pointerdown', e => { seekFrom(e); waveCan.setPointerCapture(e.pointerId); });
+  waveCan.addEventListener('pointermove', e => { if (e.buttons) seekFrom(e); });
+  return h('div', { class: 'ctl audio-box' },
+    h('div', { class: 'lbl' }, h('span', {}, 'Sound clip'), h('output', {}, 'music, dialogue, or video with sound')),
+    h('div', { class: 'audio-row' }, h('label', { class: 'btn', for: 'c-audio' }, 'Choose clip…'), file, nameEl, timeEl),
+    waveCan,
+    h('div', { class: 'audio-row' }, playBtn, h('button', { class: 'btn', type: 'button', onclick: () => seekAudio(0) }, 'Restart'), h('span', { class: 'name' }, 'Space plays and pauses')),
+    meterCan);
+}
+function syncAudioUI() {
+  if (!playBtn) return;
+  playBtn.textContent = !abuf ? 'Choose a clip' : aPlaying ? 'Pause' : 'Play';
+  nameEl.textContent = abuf ? audioName : 'No clip loaded';
+  nameEl.title = audioName;
+}
+function sizeCanvas(c) { const r = c.getBoundingClientRect(), d = Math.min(2, devicePixelRatio || 1); const w = Math.round(r.width * d), hh = Math.round(r.height * d); if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; return true; } return false; }
+function drawWaveImage() {
+  if (!waveCan || !abuf) return;
+  sizeCanvas(waveCan);
+  const W = waveCan.width, H = waveCan.height, d = abuf.getChannelData(0), step = Math.max(1, Math.floor(d.length / W));
+  const c = document.createElement('canvas'); c.width = W; c.height = H; const x = c.getContext('2d');
+  x.fillStyle = themeCol.muted;
+  for (let i = 0; i < W; i++) {
+    let mx = 0; for (let j = i * step, e = Math.min(d.length, j + step); j < e; j += 4) { const v = Math.abs(d[j]); if (v > mx) mx = v; }
+    const hh = Math.max(1, mx * H * 0.9); x.fillRect(i, (H - hh) / 2, 1, hh);
+  }
+  waveImg = c;
+}
+function drawAudioUI() {
+  if (!waveCan || waveCan.offsetParent === null) return;
+  if (abuf) {
+    if (sizeCanvas(waveCan) || !waveImg) drawWaveImage();
+    const x = waveCan.getContext('2d'), W = waveCan.width, H = waveCan.height, px = audioPos() / abuf.duration * W;
+    x.clearRect(0, 0, W, H); x.drawImage(waveImg, 0, 0);
+    x.globalCompositeOperation = 'source-atop'; x.fillStyle = themeCol.accent; x.fillRect(0, 0, px, H); x.globalCompositeOperation = 'source-over';
+    x.fillStyle = themeCol.ink; x.fillRect(px - 1, 0, 2, H);
+    timeEl.textContent = `${fmtTime(audioPos())} / ${fmtTime(abuf.duration)}`;
+  }
+  sizeCanvas(meterCan);
+  const m = meterCan.getContext('2d'), W = meterCan.width, H = meterCan.height, d = Math.min(2, devicePixelRatio || 1);
+  m.clearRect(0, 0, W, H);
+  const bars = [['Loud', ENV.level], ['Bass', ENV.bass], ['Mids', ENV.mid], ['Highs', ENV.high], ['Beat', BEAT]];
+  const bw = W / bars.length, lh = 13 * d;
+  m.font = `${10 * d}px "JetBrains Mono", monospace`; m.textBaseline = 'bottom';
+  bars.forEach(([label, v], i) => {
+    const x0 = i * bw + 2 * d, w = bw - 6 * d, hh = (H - lh - 2 * d);
+    m.fillStyle = themeCol.track; m.fillRect(x0, 0, w, hh);
+    m.fillStyle = themeCol.accent; m.fillRect(x0, hh * (1 - Math.min(1, v)), w, hh * Math.min(1, v));
+    m.fillStyle = themeCol.muted; m.fillText(label, x0, H);
+  });
+}
+
+/* Simple / all controls */
+const VIEW_STORE = 'glyph-matter:view';
+let simpleView = false;
+try { simpleView = localStorage.getItem(VIEW_STORE) === 'simple'; } catch {}
+function setView(simple) {
+  simpleView = simple; try { localStorage.setItem(VIEW_STORE, simple ? 'simple' : 'all'); } catch {}
+  document.getElementById('viewSimple').setAttribute('aria-pressed', String(simple));
+  document.getElementById('viewAll').setAttribute('aria-pressed', String(!simple));
+  syncVis();
+}
+document.getElementById('viewSimple').addEventListener('click', () => setView(true));
+document.getElementById('viewAll').addEventListener('click', () => setView(false));
+
 /* -------------------------------------------------------------- images */
 const IMG_STORE = 'glyph-matter:img';
 let userImgThumb = '';
@@ -1339,7 +1601,8 @@ document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth
 document.addEventListener('dragover', e => e.preventDefault());
 document.addEventListener('drop', e => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('dropping');
-  const f = e.dataTransfer?.files?.[0]; if (f) loadImageFile(f);
+  const f = e.dataTransfer?.files?.[0]; if (!f) return;
+  if (f.type.startsWith('audio/') || f.type.startsWith('video/')) loadAudioFile(f); else loadImageFile(f);
 });
 
 /* -------------------------------------------------------------- capture */
@@ -1418,24 +1681,33 @@ async function recordVideo() {
   if (busy || !G) return;
   const cv = renderer.domElement;
   if (!cv.captureStream || !window.MediaRecorder) { setStatus('This browser cannot record canvas video. Try Chrome, Edge, Firefox or Safari 17+.', true); return; }
-  const type = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(t => MediaRecorder.isTypeSupported(t));
+  const withSound = !!abuf, clip = withSound && P.vidLoops === 'clip';
+  const types = withSound ? ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']
+    : ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  const type = types.find(t => MediaRecorder.isTypeSupported(t));
   if (!type) { setStatus('This browser has no supported video format for recording.', true); return; }
   setBusy(true);
   const [w, h] = frameSize(Math.abs(frameAspect() - 1) < 0.01 ? 1440 : 1920);
   beginCapture(w, h);
   const stream = cv.captureStream(30), chunks = [];
+  if (withSound) { recDest = AC.createMediaStreamDestination(); AN.connect(recDest); for (const t of recDest.stream.getAudioTracks()) stream.addTrack(t); }
+  const loops = P.vidLoops === 'clip' ? 1 : +P.vidLoops;
+  const dur = clip ? Math.min(abuf.duration, 180) * 1000 : P.loopLen * loops * 1000;
   const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 16e6 });
   rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
   const done = new Promise(r => { rec.onstop = r; });
   captureAt(0);
+  if (clip) playAudio(0); else if (withSound && !aPlaying) playAudio();
   rec.start(250);
-  CAP.video = { rec, start: performance.now(), dur: P.loopLen * +P.vidLoops * 1000 };
+  CAP.video = { rec, clip, start: performance.now(), dur };
   await done;
   stream.getTracks().forEach(t => t.stop());
+  if (recDest) { try { AN.disconnect(recDest); } catch {} recDest = null; }
+  if (clip) { stopAudio(); aOffset = 0; }
   endCapture(); setBusy(false);
   const ext = type.startsWith('video/mp4') ? 'mp4' : 'webm', blob = new Blob(chunks, { type: type.split(';')[0] });
   setStatus(current?.label ? `${current.label} · ${G.cols}×${G.rows} grid` : '');
-  showOut('Video', 'video', blob, `${w} × ${h} ${ext.toUpperCase()} · ${(P.loopLen * +P.vidLoops).toFixed(1)} s · ${(blob.size / 1048576).toFixed(1)} MB`, 'glyph-matter.' + ext);
+  showOut('Video', 'video', blob, `${w} × ${h} ${ext.toUpperCase()}${withSound ? ' with sound' : ''} · ${(dur / 1000).toFixed(1)} s · ${(blob.size / 1048576).toFixed(1)} MB`, 'glyph-matter.' + ext);
 }
 
 /* ---------------------------------------------------------- GIF encoder */
@@ -1539,22 +1811,36 @@ const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, clock.getDelta());
+  drawAudioUI();
   if (CAP) {
     if (CAP.video) {
       const el = performance.now() - CAP.video.start;
       if (el >= CAP.video.dur) { if (CAP.video.rec.state === 'recording') CAP.video.rec.stop(); }
-      else { captureAt((el / 1000 / P.loopLen) % 1); setStatus(`Recording ${(el / 1000).toFixed(1)} of ${(CAP.video.dur / 1000).toFixed(1)} s`); }
+      else {
+        if (pend >= 0) processQueue();
+        audioStep(dt); const base = P, q = audioMods(); if (q) P = q;
+        applyFx(); renderer.toneMappingExposure = P.exposure; camera.updateProjectionMatrix(); if (current) current.obj.scale.setScalar(ASC);
+        captureAt((el / 1000 / P.loopLen) % 1); P = base;
+        setStatus(`Recording ${(el / 1000).toFixed(1)} of ${(CAP.video.dur / 1000).toFixed(1)} s`);
+      }
     }
     return;
   }
   processQueue();
-  const anim = P.kinetic !== 'none' || (P.speed > 0 && (P.noise > 0 || P.wave > 0 || (P.mode === 'voxels' && P.spin > 0)));
+  audioStep(dt);
+  const base = P, q = audioMods();
+  if (q) P = q;
+  const anim = !!q || P.kinetic !== 'none' || (P.speed > 0 && (P.noise > 0 || P.wave > 0 || (P.mode === 'voxels' && P.spin > 0)));
   if (anim && playing) setPhase((PH + dt / P.loopLen) % 1); else if (dirty) setPhase(PH);
+  if (q || modsLive) { applyFx(); renderer.toneMappingExposure = P.exposure; camera.updateProjectionMatrix(); if (current) current.obj.scale.setScalar(ASC); dirty = true; }
+  modsLive = !!q;
   if (current && G && ((anim && playing) || dirty)) { current.update(); dirty = false; }
   controls.update();
   render();
+  P = base;
 }
-buildUI(); syncUI(); req('glyph'); getDownloads(); frame();
+let modsLive = false;
+buildUI(); setView(simpleView); syncUI(); req('glyph'); getDownloads(); frame();
 </script>
 </body>
 </html>
